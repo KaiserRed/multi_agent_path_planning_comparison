@@ -1,6 +1,7 @@
 from queue import PriorityQueue
 from copy import deepcopy
 from mapf.a_star import astar_time
+from mapf.planner import MAPFPlanner
 
 class Conflict:
     def __init__(self, agent1, agent2, time, position):
@@ -80,3 +81,7 @@ def cbs(world, agents):
                 open_set.put(new_node)
 
     return None
+
+class CBSPlanner(MAPFPlanner):
+    def plan(self, world, agents):
+        return cbs(world, agents)
