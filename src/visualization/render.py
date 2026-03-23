@@ -28,12 +28,12 @@ def draw_world(screen, world, agents, cell_size=50, font=None):
         )
         pygame.draw.rect(screen, (50, 100, 255), rect)
 
-        # ID (если font есть)
+        
         if font:
             text = font.render(str(agent.id), True, (0, 0, 0))
             text_rect = text.get_rect(center=(
                 agent.x*cell_size + cell_size//2,
-                agent.y*cell_size - 10
+                agent.y*cell_size + cell_size//2
             ))
             screen.blit(text, text_rect)
 
