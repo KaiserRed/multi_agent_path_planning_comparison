@@ -174,3 +174,38 @@ cython_debug/
 
 # VS Code config
 .vscode*
+
+# Tex
+*.aux
+*.fls
+*.log
+*.out
+*.fdb_latexmk
+*.gz
+*.toc
+*.bbl
+*.bcf
+*.blg
+*.glg*
+*.glo*
+*.gls*
+*.xdv
+*.xdy
+*.synctex.gz
+*.synctex(busy)
+*.lof
+*.lot
+*.run.xml
+*.ist
+*.idx
+*.ilg
+*.ind
+*.nav
+*.snm
+*.vrb
+*.glsdefs
+*.acn
+*.acr
+*.alg
+.DS_Store
+Thumbs.db
