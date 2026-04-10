@@ -138,13 +138,15 @@ def _draw_side_panel(surface, planner, simulator, font_h, font_b, font_s):
     line("METRICS", font_h, COLORS["accent"])
     oy += 2
     m = simulator.metrics
-    line(f"Steps:  {simulator.time}", font_b, center=False)
-    if m.get("makespan"):
-        line(f"Makespan:   {m['makespan']}", font_b, center=False)
-    if m.get("total_cost"):
-        line(f"Total cost: {m['total_cost']}", font_b, center=False)
-    line(f"Calc:   {m['computation_s']:.4f}s", font_b, center=False)
-    line(f"Memory: {m.get('memory_peak_mb', 0):.2f} MB", font_b, center=False)
+    line(f"Makespan: {simulator.time}", font_b, center=False)
+    if m.get("soc"):
+        line(f"SOC:      {m['soc']}", font_b, center=False)
+    line(f"Calc:     {m['computation_s']:.4f}s", font_b, center=False)
+    if m.get("plan_mrta_s"):
+        line(f"  MRTA:   {m['plan_mrta_s']:.4f}s", font_b, center=False)
+    if m.get("plan_mapf_s"):
+        line(f"  MAPF:   {m['plan_mapf_s']:.4f}s", font_b, center=False)
+    line(f"Memory:   {m.get('memory_peak_mb', 0):.2f} MB", font_b, center=False)
 
     sep()
 

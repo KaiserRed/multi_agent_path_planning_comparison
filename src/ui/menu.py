@@ -88,8 +88,4 @@ class MainMenu:
         for btn in self._btns:
             btn.draw(self.screen)
 
-        # "coming soon" under Batch Mode
-        hint = self._f_small.render("(coming soon)", True, COLORS["text_muted"])
-        self.screen.blit(hint, hint.get_rect(centerx=W // 2, y=382))
-
         pygame.display.flip()

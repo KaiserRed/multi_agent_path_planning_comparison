@@ -24,6 +24,15 @@ class Simulator:
         chain per agent.  The simulator executes each chain without
         re-planning: upon task completion the next task in the chain is
         popped and the agent navigates to it immediately.
+
+    Metrics collected
+    -----------------
+    computation_s   : total planning wall time
+    plan_mrta_s     : time spent in MRTA assignment algorithm
+    plan_mapf_s     : time spent building navigation paths (all legs)
+    memory_peak_mb  : peak Python memory during planning
+    makespan        : simulation timesteps until all tasks done
+    soc             : Sum-of-Costs — total moves across all agents
     """
 
     def __init__(self, world, agents, planner, tasks=None, nav_planner=None):
@@ -51,39 +60,42 @@ class Simulator:
 
         self.metrics: dict = {
             "computation_s": 0.0,
+            "plan_mrta_s": 0.0,
+            "plan_mapf_s": 0.0,
             "memory_peak_mb": 0.0,
             "makespan": 0,
-            "total_cost": 0,
+            "soc": 0,
         }
 
         # MRTA state
-        # "online": tasks not yet assigned to any robot (drained reactively)
         self._pending_tasks: list = []
-        # "queue": ordered task chain per agent (deque for fast popleft)
         self._task_queue: dict = {}   # agent_id -> deque[Task]
 
-    # Navigation helpers
+        # Internal timing accumulators (reset at each plan() call)
+        self._mrta_s: float = 0.0
+        self._mapf_nav_s: float = 0.0
 
+    # Navigation helpers
     def _nav_all(self, agents_with_goals: list) -> dict | None:
         """Plan collision-free paths for several agents at once.
 
-        *agents_with_goals* is a list of agents that already have
-        ``goal_x / goal_y`` set to their next task.
-
         When a nav_planner is configured it is called with all agents
-        together so its conflict-resolution logic (CBS, CA*, …) can
-        produce truly collision-free paths.  Without a nav_planner the
-        agents are routed sequentially (CA*-style) using plain A* and a
-        shared reservation table.
+        together.  Without a nav_planner agents are routed sequentially
+        (CA*-style) using plain A* and a shared reservation table.
 
         Returns dict[agent_id -> list[(x,y)]] (start cell excluded),
         or None if any agent has no valid path.
+
+        Navigation time is accumulated into ``_mapf_nav_s``.
         """
         if not agents_with_goals:
             return {}
 
+        t0 = _time.perf_counter()
+
         if self._nav_planner is not None:
             paths = self._nav_planner.plan(self.world, agents_with_goals)
+            self._mapf_nav_s += _time.perf_counter() - t0
             if paths is None:
                 return None
             result: dict = {}
@@ -94,8 +106,7 @@ class Simulator:
                 result[agent.id] = raw[1:] if len(raw) > 1 else []
             return result
 
-        # Sequential CA*-style fallback: each agent routes around the
-        # previously committed paths via a shared reservation table.
+        # Sequential CA*-style fallback
         max_time = self.world.width * self.world.height * 2
         reserved: set = set()
         result = {}
@@ -108,6 +119,7 @@ class Simulator:
                 max_time=max_time,
             )
             if path is None:
+                self._mapf_nav_s += _time.perf_counter() - t0
                 return None
             for idx, (pos, t) in enumerate(path):
                 reserved.add((pos[0], pos[1], t))
@@ -120,15 +132,19 @@ class Simulator:
                     reserved.add((gx, gy, t))
             raw = [pos for pos, _ in path]
             result[agent.id] = raw[1:] if len(raw) > 1 else []
+
+        self._mapf_nav_s += _time.perf_counter() - t0
         return result
 
     def _path_to_single(self, agent, goal: tuple) -> list | None:
         """Plan a single agent's path while treating other agents' remaining
-        paths as reservations (CA*-style).  Used when one agent gets a new
-        task while others are still executing their plans.
+        paths as reservations (CA*-style).
 
+        Navigation time is accumulated into ``_mapf_nav_s``.
         Returns a list of (x, y) positions (start cell excluded), or None.
         """
+        t0 = _time.perf_counter()
+
         max_time = self.world.width * self.world.height * 2
         reserved: set = set()
 
@@ -141,7 +157,6 @@ class Simulator:
                 if t > 0:
                     prev_pos = remaining[t - 1]
                     reserved.add((prev_pos[0], prev_pos[1], t))
-            # Goal cell reserved indefinitely after path ends
             if remaining:
                 gx, gy = remaining[-1]
                 for t in range(len(remaining), max_time + 1):
@@ -151,12 +166,17 @@ class Simulator:
             self.world, (agent.x, agent.y), goal,
             reserved=reserved, max_time=max_time,
         )
+        self._mapf_nav_s += _time.perf_counter() - t0
         if path is None:
             return None
         raw = [pos for pos, _ in path]
         return raw[1:] if len(raw) > 1 else []
 
+    # Planning
     def plan(self) -> bool:
+        self._mrta_s = 0.0
+        self._mapf_nav_s = 0.0
+
         tracemalloc.start()
         t0 = _time.perf_counter()
 
@@ -165,9 +185,15 @@ class Simulator:
         else:
             success = self._plan_mrta()
 
-        self.metrics["computation_s"] = _time.perf_counter() - t0
+        total = _time.perf_counter() - t0
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
+
+        self.metrics["computation_s"] = total
+        self.metrics["plan_mrta_s"] = self._mrta_s
+        self.metrics["plan_mapf_s"] = (
+            total if self.mode == "MAPF" else self._mapf_nav_s
+        )
         self.metrics["memory_peak_mb"] = peak / (1024 * 1024)
 
         self.planned = success
@@ -185,7 +211,10 @@ class Simulator:
         return True
 
     def _plan_mrta(self) -> bool:
+        t0 = _time.perf_counter()
         assignment = self.planner.plan(self.world, self.agents, self.tasks)
+        self._mrta_s = _time.perf_counter() - t0
+
         if not assignment:
             return False
 
@@ -194,13 +223,11 @@ class Simulator:
         else:
             return self._apply_online_assignment(assignment)
 
-
+    #  Queue mode 
     def _apply_queue_assignment(self, assignment) -> bool:
-        """Apply a full chain assignment.  Build the first leg and queue the rest."""
         assigned_ids: set = set()
         self._task_queue = {}
 
-        # Set goals for all agents before joint planning.
         agents_to_nav: list = []
         for agent in self.agents:
             chain = assignment.get(agent.id, [])
@@ -216,36 +243,28 @@ class Simulator:
                 assigned_ids.add(t.id)
             self._task_queue[agent.id] = deque(remainder)
 
-        # Plan all initial legs together → collision-free.
         nav_paths = self._nav_all(agents_to_nav)
         if nav_paths is None:
             return False
         for agent in agents_to_nav:
             agent.set_path(nav_paths[agent.id])
-
         return True
 
     def _pop_next_queued_task(self, agent) -> None:
-        """Give the agent its next queued task (if any)."""
         q = self._task_queue.get(agent.id)
         if not q:
             return
-
         task = q.popleft()
         task.assigned_to = agent.id
         agent.goal_x, agent.goal_y = task.x, task.y
-
-        # Plan around other agents' remaining paths (CA*-style).
         steps = self._path_to_single(agent, (task.x, task.y))
         if steps is None:
             return
         agent.set_path(steps)
 
+    #  Online mode 
     def _apply_online_assignment(self, assignment) -> bool:
-        """Apply a single-task assignment and track unassigned tasks."""
         assigned_ids: set = set()
-
-        # Set goals for all assigned agents before joint planning.
         agents_to_nav: list = []
         for agent in self.agents:
             task_list = assignment.get(agent.id, [])
@@ -257,25 +276,24 @@ class Simulator:
             agent.goal_x, agent.goal_y = task.x, task.y
             agents_to_nav.append(agent)
 
-        # Plan all initial legs together -> collision-free.
         nav_paths = self._nav_all(agents_to_nav)
         if nav_paths is None:
             return False
         for agent in agents_to_nav:
             agent.set_path(nav_paths[agent.id])
-
         self._pending_tasks = [t for t in self.tasks if t.id not in assigned_ids]
         return True
 
     def _try_assign_next_online(self, agent) -> None:
-        """Re-run the planner for one free agent and assign its next task."""
         if not self._pending_tasks:
             return
 
+        t0 = _time.perf_counter()
         assignment = self.planner.plan(self.world, [agent], self._pending_tasks)
+        self._mrta_s += _time.perf_counter() - t0
+
         if not assignment or agent.id not in assignment:
             return
-
         task_list = assignment[agent.id]
         if not task_list:
             return
@@ -283,9 +301,7 @@ class Simulator:
         task.assigned_to = agent.id
         self._pending_tasks = [t for t in self._pending_tasks
                                if t.id != task.id]
-
         agent.goal_x, agent.goal_y = task.x, task.y
-        # Plan around other agents' remaining paths (CA*-style).
         steps = self._path_to_single(agent, (task.x, task.y))
         if steps is None:
             return
@@ -303,6 +319,8 @@ class Simulator:
                 if nxt is not None:
                     agent.x, agent.y = nxt
                     any_moved = True
+                    # SOC: count every individual move
+                    self.metrics["soc"] += 1
 
         if any_moved:
             self.time += 1
@@ -329,34 +347,41 @@ class Simulator:
         agents_idle = not any(a.has_path() for a in self.agents)
         if self.mode == "MRTA":
             if self._assignment_mode == "queue":
-                # Done when no agent is moving and all queues are empty.
                 queues_empty = all(
                     not q for q in self._task_queue.values()
                 )
                 return agents_idle and queues_empty
             else:
-                # Done when no agent is moving and no tasks are pending.
                 return agents_idle and not self._pending_tasks
         return agents_idle
 
+    # Metrics
     def get_metrics(self) -> dict:
         if self.is_done() and self.metrics["makespan"] == 0 and self.time > 0:
             self.metrics["makespan"] = self.time
-            self.metrics["total_cost"] = sum(
-                len(a.path) for a in self.agents if a.path
-            )
+        # Update split timings in case online MRTA added more after plan()
+        self.metrics["plan_mrta_s"] = self._mrta_s
+        self.metrics["plan_mapf_s"] = (
+            self.metrics["computation_s"]
+            if self.mode == "MAPF"
+            else self._mapf_nav_s
+        )
         return self.metrics
 
-
+    # Reset
     def reset(self):
         self.time = 0
         self.planned = False
         self.failed = False
+        self._mrta_s = 0.0
+        self._mapf_nav_s = 0.0
         self.metrics = {
             "computation_s": 0.0,
+            "plan_mrta_s": 0.0,
+            "plan_mapf_s": 0.0,
             "memory_peak_mb": 0.0,
             "makespan": 0,
-            "total_cost": 0,
+            "soc": 0,
         }
 
         self._pending_tasks = []

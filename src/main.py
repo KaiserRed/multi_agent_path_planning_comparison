@@ -25,6 +25,10 @@ from registry import get_planner
 from scenario import SceneData, load_scenario
 from simulation.simulator import Simulator
 from ui.algo_select import AlgoSelect
+from ui.batch_ui import (
+    BatchAlgoScreen, BatchMapScreen, BatchProgressScreen,
+    BATCH_W, BATCH_H,
+)
 from ui.editor import WorldEditor, SIDE_W as EDITOR_SIDE_W, _fit_cell
 from ui.menu import MainMenu, MENU_W, MENU_H
 from visualization.render import draw_simulation, _SIDE_W as SIM_SIDE_W
@@ -265,6 +269,84 @@ def run_simulation(
         )
 
 
+# Batch runner
+def run_batch(clock: pygame.time.Clock) -> None:
+    """Three-screen Batch Mode flow."""
+    screen = pygame.display.set_mode((BATCH_W, BATCH_H))
+    pygame.display.set_caption("Batch Mode")
+
+    #  Screen 1: algorithm selection 
+    algo_screen = BatchAlgoScreen(screen)
+    while True:
+        clock.tick(60)
+        events = pygame.event.get()
+        for e in events:
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        result = algo_screen.handle_events(events)
+        algo_screen.update()
+        algo_screen.draw()
+        if result == "back":
+            return
+        if result == "next":
+            break
+
+    mapf_algos, mrta_algos = algo_screen.get_selection()
+
+    #  Screen 2: map / parameters 
+    map_screen = BatchMapScreen(screen, mapf_algos, mrta_algos)
+    while True:
+        dt = clock.tick(60)
+        events = pygame.event.get()
+        for e in events:
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        result = map_screen.handle_events(events)
+        map_screen.update(dt)
+        map_screen.draw()
+        if result == "back":
+            # Return to algo screen
+            algo_screen = BatchAlgoScreen(screen)
+            while True:
+                clock.tick(60)
+                events = pygame.event.get()
+                for e in events:
+                    if e.type == pygame.QUIT:
+                        pygame.quit()
+                        sys.exit()
+                result2 = algo_screen.handle_events(events)
+                algo_screen.update()
+                algo_screen.draw()
+                if result2 == "back":
+                    return
+                if result2 == "next":
+                    break
+            mapf_algos, mrta_algos = algo_screen.get_selection()
+            map_screen = BatchMapScreen(screen, mapf_algos, mrta_algos)
+            continue
+        if result == "run":
+            break
+
+    config = map_screen.build_config()
+
+    #  Screen 3: progress 
+    progress_screen = BatchProgressScreen(screen, config)
+    while True:
+        clock.tick(30)
+        events = pygame.event.get()
+        for e in events:
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        result = progress_screen.handle_events(events)
+        progress_screen.update()
+        progress_screen.draw()
+        if result == "menu":
+            return
+
+
 # Main loop
 def main():
     pygame.init()
@@ -279,6 +361,7 @@ def main():
             break
 
         if action == "batch":
+            run_batch(clock)
             continue
 
         # Determine initial scene 
