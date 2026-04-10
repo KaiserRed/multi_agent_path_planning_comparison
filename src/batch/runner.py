@@ -1,0 +1,213 @@
+"""BatchRunner — headless execution of MAPF+MRTA experiments.
+
+Each run gets its own Simulator instance.  Timeout is enforced via a
+threading.Timer that sets a flag; the simulation loop checks it and
+aborts early.
+"""
+
+from __future__ import annotations
+
+import threading
+import time as _time
+from typing import Callable
+
+import pandas as pd
+
+from batch.config import BatchConfig
+from batch.generator import SceneGenerator
+from core.agent import Agent
+from core.task import Task
+from core.world import World
+from registry import ALGORITHMS, get_planner
+from simulation.simulator import Simulator
+
+
+_GENERATOR = SceneGenerator()
+
+# Columns of the results DataFrame
+COLUMNS = [
+    "mrta_algo", "mapf_algo", "n_robots", "scenario_seed",
+    "success", "makespan", "soc",
+    "plan_total_s", "plan_mrta_s", "plan_mapf_s", "memory_mb",
+]
+
+
+def _build_scene(scene_data, algo_type: str):
+    """Reuse the same logic as main.py._build_scene."""
+    from scenario import SceneData
+    world = World(scene_data.grid_width, scene_data.grid_height,
+                  scene_data.obstacles)
+    agents: list[Agent] = []
+    tasks: list[Task] = []
+
+    if algo_type == "MAPF":
+        n = min(len(scene_data.agent_starts), len(scene_data.goals))
+        for i in range(n):
+            sx, sy = scene_data.agent_starts[i]
+            gx, gy = scene_data.goals[i]
+            agents.append(Agent(i, sx, sy, gx, gy))
+    else:
+        for i, (sx, sy) in enumerate(scene_data.agent_starts):
+            agents.append(Agent(i, sx, sy, sx, sy))
+        for i, (gx, gy) in enumerate(scene_data.goals):
+            tasks.append(Task(i, gx, gy))
+
+    return world, agents, tasks
+
+
+def _run_single(
+    scene_data,
+    mrta_name: str,
+    mapf_name: str,
+    timeout_s: float,
+) -> dict:
+    """Run one scenario and return a result-row dict."""
+    row: dict = {
+        "mrta_algo": mrta_name,
+        "mapf_algo": mapf_name,
+        "n_robots": len(scene_data.agent_starts),
+        "success": False,
+        "makespan": 0,
+        "soc": 0,
+        "plan_total_s": 0.0,
+        "plan_mrta_s": 0.0,
+        "plan_mapf_s": 0.0,
+        "memory_mb": 0.0,
+    }
+
+    try:
+        mrta_planner = get_planner("MRTA", mrta_name)
+        nav_planner = get_planner("MAPF", mapf_name)
+
+        # MRTA mode only: agents get goals from planner.
+        world, agents, tasks = _build_scene(scene_data, "MRTA")
+        sim = Simulator(world, agents, mrta_planner, tasks,
+                        nav_planner=nav_planner)
+
+        # Timeout flag
+        timed_out = threading.Event()
+        timer = None
+        if timeout_s > 0:
+            def _timeout():
+                timed_out.set()
+            timer = threading.Timer(timeout_s, _timeout)
+            timer.start()
+
+        success = sim.plan()
+
+        if success:
+            max_steps = world.width * world.height * len(agents) * 4
+            step_count = 0
+            while not sim.is_done() and step_count < max_steps:
+                if timed_out.is_set():
+                    success = False
+                    break
+                sim.step()
+                step_count += 1
+
+            if sim.is_done():
+                success = True
+            else:
+                success = False
+
+        if timer is not None:
+            timer.cancel()
+
+        m = sim.get_metrics()
+        row["success"] = success
+        row["makespan"] = sim.time if success else 0
+        row["soc"] = m.get("soc", 0)
+        row["plan_total_s"] = m.get("computation_s", 0.0)
+        row["plan_mrta_s"] = m.get("plan_mrta_s", 0.0)
+        row["plan_mapf_s"] = m.get("plan_mapf_s", 0.0)
+        row["memory_mb"] = m.get("memory_peak_mb", 0.0)
+
+    except Exception as exc:
+        row["success"] = False
+        row["makespan"] = 0
+
+    return row
+
+
+class BatchRunner:
+    """Run all combinations and report progress via a callback."""
+
+    def run(
+        self,
+        config: BatchConfig,
+        progress_cb: Callable[[float, str], None] | None = None,
+    ) -> pd.DataFrame:
+        """Execute the full batch.
+
+        *progress_cb(fraction, current_label)* is called after every
+        individual run (0.0 → 1.0).
+
+        Returns a pandas DataFrame with columns defined in ``COLUMNS``.
+        """
+        mapf_algos = config.mapf_algos or [
+            p.DISPLAY_NAME for p in ALGORITHMS["MAPF"]
+        ]
+        mrta_algos = config.mrta_algos or [
+            p.DISPLAY_NAME for p in ALGORITHMS["MRTA"]
+        ]
+
+        robot_counts = list(range(
+            config.robot_min, config.robot_max + 1, config.robot_step
+        ))
+        if not robot_counts:
+            robot_counts = [config.robot_min]
+
+        combos = [
+            (mrta, mapf)
+            for mrta in mrta_algos
+            for mapf in mapf_algos
+        ]
+
+        total = (
+            len(combos)
+            * len(robot_counts)
+            * config.scenarios_per_n
+        )
+        completed = 0
+
+        rows: list[dict] = []
+
+        for mrta_name, mapf_name in combos:
+            for n_robots in robot_counts:
+                for seed in range(config.scenarios_per_n):
+                    label = (
+                        f"{mrta_name} + {mapf_name} | "
+                        f"robots={n_robots} seed={seed}"
+                    )
+
+                    scene = _GENERATOR.generate(config, n_robots, seed)
+                    if scene is None:
+                        row = {
+                            "mrta_algo": mrta_name,
+                            "mapf_algo": mapf_name,
+                            "n_robots": n_robots,
+                            "scenario_seed": seed,
+                            "success": False,
+                            "makespan": 0,
+                            "soc": 0,
+                            "plan_total_s": 0.0,
+                            "plan_mrta_s": 0.0,
+                            "plan_mapf_s": 0.0,
+                            "memory_mb": 0.0,
+                        }
+                    else:
+                        row = _run_single(
+                            scene, mrta_name, mapf_name,
+                            config.timeout_s,
+                        )
+                        row["scenario_seed"] = seed
+                        row["n_robots"] = n_robots
+
+                    rows.append(row)
+                    completed += 1
+
+                    if progress_cb is not None:
+                        progress_cb(completed / total, label)
+
+        df = pd.DataFrame(rows, columns=COLUMNS)
+        return df
