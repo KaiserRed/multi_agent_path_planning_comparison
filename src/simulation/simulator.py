@@ -5,6 +5,27 @@ from collections import deque
 from mapf.a_star import astar_time
 
 
+def _expand_path(path: list) -> list:
+    """Convert a planner path to one position per timestep.
+
+    Planners like A* already emit one ``(pos, t)`` entry per step, so the
+    list is already dense.  SIPP emits a *compressed* path where only
+    position-changes are recorded and waiting periods are implicit.
+    This helper expands such paths so each timestep gets its own entry,
+    making them interchangeable with A* output for the simulator.
+    """
+    if not path:
+        return []
+    expanded: list = []
+    for i in range(len(path) - 1):
+        pos, t = path[i]
+        next_t = path[i + 1][1]
+        for _ in range(next_t - t):
+            expanded.append(pos)
+    expanded.append(path[-1][0])
+    return expanded
+
+
 class Simulator:
     """
     Unified simulator for both MAPF and MRTA scenarios.
@@ -102,7 +123,7 @@ class Simulator:
             for agent in agents_with_goals:
                 if agent.id not in paths:
                     return None
-                raw = [pos for pos, _ in paths[agent.id]]
+                raw = _expand_path(paths[agent.id])
                 result[agent.id] = raw[1:] if len(raw) > 1 else []
             return result
 
@@ -206,7 +227,7 @@ class Simulator:
             return False
         for agent in self.agents:
             if agent.id in paths:
-                raw = [pos for pos, _ in paths[agent.id]]
+                raw = _expand_path(paths[agent.id])
                 agent.set_path(raw[1:] if len(raw) > 1 else [])
         return True
 
@@ -257,7 +278,11 @@ class Simulator:
         task = q.popleft()
         task.assigned_to = agent.id
         agent.goal_x, agent.goal_y = task.x, task.y
-        steps = self._path_to_single(agent, (task.x, task.y))
+        if self._nav_planner is not None:
+            nav = self._nav_all([agent])
+            steps = nav[agent.id] if nav else None
+        else:
+            steps = self._path_to_single(agent, (task.x, task.y))
         if steps is None:
             return
         agent.set_path(steps)
@@ -302,7 +327,11 @@ class Simulator:
         self._pending_tasks = [t for t in self._pending_tasks
                                if t.id != task.id]
         agent.goal_x, agent.goal_y = task.x, task.y
-        steps = self._path_to_single(agent, (task.x, task.y))
+        if self._nav_planner is not None:
+            nav = self._nav_all([agent])
+            steps = nav[agent.id] if nav else None
+        else:
+            steps = self._path_to_single(agent, (task.x, task.y))
         if steps is None:
             return
         agent.set_path(steps)

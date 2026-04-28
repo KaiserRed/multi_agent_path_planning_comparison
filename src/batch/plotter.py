@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 
 import matplotlib
-matplotlib.use("Agg")   # headless, no display required
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -26,6 +26,34 @@ _PLOT_STYLE = {
     "legend.facecolor": "#16204a",
     "legend.edgecolor": "#37497c",
 }
+
+_MRTA_MARKERS: dict[str, str] = {
+    "Hungarian":             "o",   # кружок
+    "Greedy":                "s",   # квадрат
+    "Sequential Auction":    "D",   # ромб
+    "Min-Cost Flow":         "^",   # треугольник вверх
+    "Combinatorial Auction": "v",   # треугольник вниз
+}
+_MARKER_DEFAULT = "P"  # жирный «+» — для неизвестных MRTA
+
+_PALETTE = [
+    "#4e91f7",  # синий
+    "#f76e4e",  # оранжевый
+    "#4ef7a0",  # зелёный
+    "#f7e04e",  # жёлтый
+    "#c24ef7",  # фиолетовый
+    "#f74ec2",  # розовый
+    "#4ef7f0",  # бирюзовый
+    "#f7a04e",  # персиковый
+    "#7cf74e",  # лаймовый
+    "#4e6df7",  # индиго
+    "#f74e4e",  # красный
+    "#4ef7d4",  # мята
+    "#f7d44e",  # золотой
+    "#a04ef7",  # лиловый
+    "#4ef76e",  # светло-зелёный
+    "#f74e8f",  # малиновый
+]
 
 
 def _combo_label(row_key) -> str:
@@ -50,23 +78,20 @@ def _plot_metric(
     title: str,
 ):
     """Draw one line per combo onto *ax*."""
-    cmap = plt.colormaps.get_cmap("tab20")
-    colors = [cmap(i / max(len(combos), 1)) for i in range(len(combos))]
+    colors = [_PALETTE[i % len(_PALETTE)] for i in range(len(combos))]
 
     for i, combo in enumerate(combos):
-        key = combo
-        if key not in grouped.groups:
+        if combo not in grouped.groups:
             continue
-        grp = grouped.get_group(key)
+        grp = grouped.get_group(combo)
         ns = grp["n_robots"]
         mean = grp[metric_col]
-        std = grp.get(metric_col + "_std", None)
+
+        mrta_name = combo[0]
+        marker = _MRTA_MARKERS.get(mrta_name, _MARKER_DEFAULT)
 
         ax.plot(ns, mean, label=_combo_label(combo),
-                color=colors[i], marker="o", markersize=5)
-        if std is not None:
-            ax.fill_between(ns, mean - std, mean + std,
-                            alpha=0.15, color=colors[i])
+                color=colors[i], marker=marker, markersize=6)
 
     ax.set_xlabel("Number of robots")
     ax.set_ylabel(y_label)
