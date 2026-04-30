@@ -38,7 +38,6 @@ def _free_cells(grid_w: int, grid_h: int,
     ]
 
 
-# ── Placement strategies ──────────────────────────────────────────────────────
 
 def _place_uniform(grid_w: int, grid_h: int, obstacles: set,
                    n_agents: int, rng: random.Random
@@ -129,7 +128,6 @@ def _place_min_dist(grid_w: int, grid_h: int, obstacles: set,
     return starts, goals
 
 
-# ── Reachability ──────────────────────────────────────────────────────────────
 
 def _bfs_reachable(grid_w: int, grid_h: int, obstacles: set,
                    start: tuple, goal: tuple) -> bool:
@@ -159,7 +157,6 @@ def _all_reachable(grid_w: int, grid_h: int, obstacles: set,
     return True
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
 
 _PLACEMENT_FNS = {
     "uniform":   _place_uniform,
@@ -180,7 +177,6 @@ class SceneGenerator:
             return self._from_imported(config, n_robots, seed)
         return self._generate_random(config, n_robots, seed)
 
-    # ── Random generation ────────────────────────────────────────────
 
     def _generate_random(self, config: BatchConfig,
                          n_robots: int, seed: int) -> SceneData | None:
@@ -216,7 +212,6 @@ class SceneGenerator:
             )
         return None
 
-    # ── Imported maps ────────────────────────────────────────────────
 
     def _from_imported(self, config: BatchConfig,
                        n_robots: int, seed: int) -> SceneData | None:

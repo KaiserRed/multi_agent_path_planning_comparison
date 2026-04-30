@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 
 @dataclass
 class BatchConfig:
-    # Algorithm selection
     mapf_algos: list[str] = field(default_factory=list)
     mrta_algos: list[str] = field(default_factory=list)
 
@@ -18,7 +17,7 @@ class BatchConfig:
     scenarios_per_n: int = 3          # random seeds per robot count
     grid_w: int = 12
     grid_h: int = 12
-    obstacle_density: float = 0.15    # 0–0.4
+    obstacle_density: float = 0.15
     placement: str = "uniform"        # "uniform"|"clustered"|"counter"|"min_dist"
     check_reachability: bool = True
 
