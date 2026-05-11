@@ -7,6 +7,9 @@ aborts early.
 
 from __future__ import annotations
 
+import csv
+import gc
+import os
 import threading
 import time as _time
 from typing import Callable
@@ -24,7 +27,6 @@ from simulation.simulator import Simulator
 
 _GENERATOR = SceneGenerator()
 
-# Columns of the results DataFrame
 COLUMNS = [
     "mrta_algo", "mapf_algo", "n_robots", "scenario_seed",
     "success", "makespan", "soc",
@@ -60,6 +62,7 @@ def _run_single(
     mrta_name: str,
     mapf_name: str,
     timeout_s: float,
+    plan_timeout_s: float = 0.0,
 ) -> dict:
     """Run one scenario and return a result-row dict."""
     row: dict = {
@@ -79,12 +82,32 @@ def _run_single(
         mrta_planner = get_planner("MRTA", mrta_name)
         nav_planner = get_planner("MAPF", mapf_name)
 
-        # MRTA mode only: agents get goals from planner.
         world, agents, tasks = _build_scene(scene_data, "MRTA")
         sim = Simulator(world, agents, mrta_planner, tasks,
                         nav_planner=nav_planner)
 
-        # Timeout flag
+        plan_result: list = [False]
+        plan_exc:    list = [None]
+
+        def _do_plan():
+            try:
+                plan_result[0] = sim.plan()
+            except Exception as exc:  # noqa: BLE001
+                plan_exc[0] = exc
+
+        plan_thread = threading.Thread(target=_do_plan, daemon=True)
+        plan_thread.start()
+        join_t = plan_timeout_s if plan_timeout_s > 0 else None
+        plan_thread.join(timeout=join_t)
+
+        if plan_thread.is_alive():
+            return row
+
+        if plan_exc[0] is not None:
+            raise plan_exc[0]
+
+        success = plan_result[0]
+
         timed_out = threading.Event()
         timer = None
         if timeout_s > 0:
@@ -92,8 +115,6 @@ def _run_single(
                 timed_out.set()
             timer = threading.Timer(timeout_s, _timeout)
             timer.start()
-
-        success = sim.plan()
 
         if success:
             max_steps = world.width * world.height * len(agents) * 4
@@ -122,7 +143,7 @@ def _run_single(
         row["plan_mapf_s"] = m.get("plan_mapf_s", 0.0)
         row["memory_mb"] = m.get("memory_peak_mb", 0.0)
 
-    except Exception as exc:
+    except Exception:
         row["success"] = False
         row["makespan"] = 0
 
@@ -172,42 +193,60 @@ class BatchRunner:
 
         rows: list[dict] = []
 
-        for mrta_name, mapf_name in combos:
-            for n_robots in robot_counts:
-                for seed in range(config.scenarios_per_n):
-                    label = (
-                        f"{mrta_name} + {mapf_name} | "
-                        f"robots={n_robots} seed={seed}"
-                    )
+        os.makedirs(config.output_dir, exist_ok=True)
+        partial_path = os.path.join(config.output_dir, "_partial.csv")
+        partial_file = open(partial_path, "w", newline="", encoding="utf-8")
+        writer = csv.DictWriter(partial_file, fieldnames=COLUMNS, extrasaction="ignore")
+        writer.writeheader()
 
-                    scene = _GENERATOR.generate(config, n_robots, seed)
-                    if scene is None:
-                        row = {
-                            "mrta_algo": mrta_name,
-                            "mapf_algo": mapf_name,
-                            "n_robots": n_robots,
-                            "scenario_seed": seed,
-                            "success": False,
-                            "makespan": 0,
-                            "soc": 0,
-                            "plan_total_s": 0.0,
-                            "plan_mrta_s": 0.0,
-                            "plan_mapf_s": 0.0,
-                            "memory_mb": 0.0,
-                        }
-                    else:
-                        row = _run_single(
-                            scene, mrta_name, mapf_name,
-                            config.timeout_s,
+        try:
+            for mrta_name, mapf_name in combos:
+                for n_robots in robot_counts:
+                    for seed in range(config.scenarios_per_n):
+                        label = (
+                            f"{mrta_name} + {mapf_name} | "
+                            f"robots={n_robots} seed={seed}"
                         )
-                        row["scenario_seed"] = seed
-                        row["n_robots"] = n_robots
 
-                    rows.append(row)
-                    completed += 1
+                        scene = _GENERATOR.generate(config, n_robots, seed)
+                        if scene is None:
+                            row = {
+                                "mrta_algo": mrta_name,
+                                "mapf_algo": mapf_name,
+                                "n_robots": n_robots,
+                                "scenario_seed": seed,
+                                "success": False,
+                                "makespan": 0,
+                                "soc": 0,
+                                "plan_total_s": 0.0,
+                                "plan_mrta_s": 0.0,
+                                "plan_mapf_s": 0.0,
+                                "memory_mb": 0.0,
+                            }
+                        else:
+                            row = _run_single(
+                                scene, mrta_name, mapf_name,
+                                config.timeout_s,
+                                config.plan_timeout_s,
+                            )
+                            row["scenario_seed"] = seed
+                            row["n_robots"] = n_robots
 
-                    if progress_cb is not None:
-                        progress_cb(completed / total, label)
+                        gc.collect()
+
+                        rows.append(row)
+                        writer.writerow(row)
+                        partial_file.flush()
+                        completed += 1
+
+                        if progress_cb is not None:
+                            progress_cb(completed / total, label)
+        finally:
+            partial_file.close()
+            try:
+                os.remove(partial_path)
+            except OSError:
+                pass
 
         df = pd.DataFrame(rows, columns=COLUMNS)
         return df

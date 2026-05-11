@@ -34,25 +34,21 @@ _MRTA_MARKERS: dict[str, str] = {
     "Min-Cost Flow":         "^",   # треугольник вверх
     "Combinatorial Auction": "v",   # треугольник вниз
 }
-_MARKER_DEFAULT = "P"  # жирный «+» — для неизвестных MRTA
+_MARKER_DEFAULT = "P" 
 
-_PALETTE = [
-    "#4e91f7",  # синий
-    "#f76e4e",  # оранжевый
-    "#4ef7a0",  # зелёный
-    "#f7e04e",  # жёлтый
-    "#c24ef7",  # фиолетовый
-    "#f74ec2",  # розовый
-    "#4ef7f0",  # бирюзовый
-    "#f7a04e",  # персиковый
-    "#7cf74e",  # лаймовый
-    "#4e6df7",  # индиго
-    "#f74e4e",  # красный
-    "#4ef7d4",  # мята
-    "#f7d44e",  # золотой
-    "#a04ef7",  # лиловый
-    "#4ef76e",  # светло-зелёный
-    "#f74e8f",  # малиновый
+_MAPF_COLORS: dict[str, str] = {
+    "CBS (A*)":   "#4e91f7",  # синий
+    "CBS (SIPP)": "#f76e4e",  # оранжевый
+    "ECBS":       "#4ef7a0",  # зелёный
+    "EECBS":      "#f7e04e",  # жёлтый
+    "M*":         "#c24ef7",  # фиолетовый
+    "CA*":        "#f74e4e",  # красный
+    "WHCA*":      "#4ef7f0",  # голубой
+    "PIBT":       "#f74ec2",  # розовый
+}
+_COLOR_FALLBACK = [
+    "#7cf74e", "#4e6df7", "#f7a04e", "#a04ef7",
+    "#4ef7d4", "#f7d44e", "#4ef76e", "#f74e8f",
 ]
 
 
@@ -78,20 +74,28 @@ def _plot_metric(
     title: str,
 ):
     """Draw one line per combo onto *ax*."""
-    colors = [_PALETTE[i % len(_PALETTE)] for i in range(len(combos))]
+    unknown_mapf: list[str] = []
 
-    for i, combo in enumerate(combos):
+    def _color(mapf_name: str) -> str:
+        if mapf_name in _MAPF_COLORS:
+            return _MAPF_COLORS[mapf_name]
+        if mapf_name not in unknown_mapf:
+            unknown_mapf.append(mapf_name)
+        return _COLOR_FALLBACK[unknown_mapf.index(mapf_name) % len(_COLOR_FALLBACK)]
+
+    for combo in combos:
         if combo not in grouped.groups:
             continue
         grp = grouped.get_group(combo)
         ns = grp["n_robots"]
         mean = grp[metric_col]
 
-        mrta_name = combo[0]
+        mrta_name, mapf_name = combo
         marker = _MRTA_MARKERS.get(mrta_name, _MARKER_DEFAULT)
+        color  = _color(mapf_name)
 
         ax.plot(ns, mean, label=_combo_label(combo),
-                color=colors[i], marker=marker, markersize=6)
+                color=color, marker=marker, markersize=6)
 
     ax.set_xlabel("Number of robots")
     ax.set_ylabel(y_label)
@@ -109,22 +113,18 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
     """
     out = _make_timestamped_dir(output_dir)
 
-    # CSV
     csv_path = os.path.join(out, "results.csv")
     df.to_csv(csv_path, index=False)
 
-    # Aggregate: filter successes only for makespan/soc metrics
     success_df = df[df["success"]].copy()
 
     if success_df.empty:
-        # Still save success-rate chart using all data
         success_df = df.copy()
         success_df["makespan"] = 0
         success_df["soc"] = 0
 
     combos = list(df.groupby(["mrta_algo", "mapf_algo"]).groups.keys())
 
-    # Build aggregated DataFrame: mean + std per (combo, n_robots)
     def _agg(source: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         g = source.groupby(["mrta_algo", "mapf_algo", "n_robots"])
         mean = g[cols].mean().reset_index()
@@ -137,7 +137,6 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
                                      "plan_total_s", "plan_mrta_s",
                                      "plan_mapf_s"])
 
-    # Success rate aggregation (uses full df)
     sr_agg = (
         df.groupby(["mrta_algo", "mapf_algo", "n_robots"])["success"]
         .mean()

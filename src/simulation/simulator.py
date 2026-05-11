@@ -149,7 +149,8 @@ class Simulator:
                     reserved.add((prev_pos[0], prev_pos[1], t))
             if path:
                 gx, gy = path[-1][0]
-                for t in range(len(path), max_time + 1):
+                reservation_end = min(len(path) + 100, max_time)
+                for t in range(len(path), reservation_end + 1):
                     reserved.add((gx, gy, t))
             raw = [pos for pos, _ in path]
             result[agent.id] = raw[1:] if len(raw) > 1 else []
@@ -180,7 +181,8 @@ class Simulator:
                     reserved.add((prev_pos[0], prev_pos[1], t))
             if remaining:
                 gx, gy = remaining[-1]
-                for t in range(len(remaining), max_time + 1):
+                reservation_end = min(len(remaining) + 100, max_time)
+                for t in range(len(remaining), reservation_end + 1):
                     reserved.add((gx, gy, t))
 
         path = astar_time(
@@ -199,16 +201,18 @@ class Simulator:
         self._mapf_nav_s = 0.0
 
         tracemalloc.start()
-        t0 = _time.perf_counter()
+        try:
+            t0 = _time.perf_counter()
 
-        if self.mode == "MAPF":
-            success = self._plan_mapf()
-        else:
-            success = self._plan_mrta()
+            if self.mode == "MAPF":
+                success = self._plan_mapf()
+            else:
+                success = self._plan_mrta()
 
-        total = _time.perf_counter() - t0
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+            total = _time.perf_counter() - t0
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
 
         self.metrics["computation_s"] = total
         self.metrics["plan_mrta_s"] = self._mrta_s

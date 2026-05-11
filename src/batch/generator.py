@@ -71,7 +71,6 @@ def _place_clustered(grid_w: int, grid_h: int, obstacles: set,
         and (abs(x - cx) > r_outer or abs(y - cy) > r_outer)
     ]
     if len(inner) < n_agents or len(outer) < n_agents:
-        # Fall back to uniform
         return _place_uniform(grid_w, grid_h, obstacles, n_agents, rng)
 
     starts = rng.sample(inner, n_agents)
