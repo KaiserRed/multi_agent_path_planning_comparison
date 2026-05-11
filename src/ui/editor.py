@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pygame
 
-from scenario import SceneData, save_scenario
+from scenario import SceneData, load_map_file, save_scenario
 from ui.widgets import COLORS, Button, NumberInput, draw_panel
 
 AGENT_COLORS = [
@@ -158,10 +158,10 @@ class WorldEditor:
         # Grid size inputs
         half = (sw - 30) // 2
         self._w_input = NumberInput(
-            (sx, 38, half, 28), self.grid_w, self._fs, 3, 50,
+            (sx, 38, half, 28), self.grid_w, self._fs, 3, 1000,
         )
         self._h_input = NumberInput(
-            (sx + half + 30, 38, half, 28), self.grid_h, self._fs, 3, 50,
+            (sx + half + 30, 38, half, 28), self.grid_h, self._fs, 3, 1000,
         )
         self._apply_btn = Button(
             (sx, 72, sw, 28), "Apply Size", self._ft,
@@ -181,6 +181,7 @@ class WorldEditor:
         )
         self._clear_btn = Button((sx, H - 118, sw, 30), "Clear All", self._fs)
         self._save_btn = Button((sx, H - 154, sw, 30), "Save JSON", self._fs)
+        self._load_btn = Button((sx, H - 190, sw, 30), "Load Map", self._fs)
 
         self._inputs = [self._w_input, self._h_input]
 
@@ -241,7 +242,47 @@ class WorldEditor:
         ]
         self._layout()
 
-    # File save
+    # File load / save
+    def _do_load(self):
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.askopenfilename(
+                title="Load Map",
+                filetypes=[
+                    ("Map files", "*.json *.map *.scen"),
+                    ("JSON files", "*.json"),
+                    ("MovingAI maps", "*.map"),
+                    ("MovingAI scenarios", "*.scen"),
+                    ("All files", "*.*"),
+                ],
+            )
+            root.destroy()
+        except Exception:
+            path = None
+
+        if not path:
+            return
+        try:
+            scene = load_map_file(path)
+        except Exception as exc:
+            self._error = f"Load failed: {exc}"
+            return
+
+        self.grid_w = scene.grid_width
+        self.grid_h = scene.grid_height
+        self.obstacles = set(tuple(p) for p in scene.obstacles)
+        starts = [tuple(p) for p in scene.agent_starts]
+        gs = [tuple(p) for p in scene.goals]
+        self.agent_starts = starts[:50]
+        self.goals = gs[:50]
+        self._error = None
+        self._layout()
+        self._build_widgets()
+
     def _do_save(self):
         try:
             import tkinter as tk
@@ -299,6 +340,9 @@ class WorldEditor:
                     self._select_tool(btn.text)
 
             # Action buttons
+            if self._load_btn.handle_event(event):
+                self._do_load()
+
             if self._save_btn.handle_event(event):
                 self._do_save()
 
@@ -352,6 +396,7 @@ class WorldEditor:
         for btn in self._tool_btns:
             btn.update()
         self._apply_btn.update()
+        self._load_btn.update()
         self._save_btn.update()
         self._clear_btn.update()
         self._done_btn.update()
@@ -461,6 +506,7 @@ class WorldEditor:
             self.screen.blit(err, err.get_rect(centerx=cx, y=H - 170))
 
         # Action buttons
+        self._load_btn.draw(self.screen)
         self._save_btn.draw(self.screen)
         self._clear_btn.draw(self.screen)
         self._done_btn.draw(self.screen)

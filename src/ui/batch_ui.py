@@ -184,25 +184,27 @@ class BatchMapScreen:
         )
         col = _COL1_X
         col2 = _COL2_X
-        self._grid_w  = ni(col + 100, 78,  12, 4, 40)
-        self._grid_h  = ni(col + 190, 78,  12, 4, 40)
-        self._rob_min = ni(col + 100, 115,  2, 1, 50)
-        self._rob_max = ni(col + 190, 115,  8, 1, 50)
-        self._rob_step= ni(col + 280, 115,  2, 1, 20)
-        self._scen_n  = ni(col + 160, 150,  3, 1, 20)
-        self._obs_pct = ni(col + 160, 186, 15, 0, 40)
-        self._timeout = ni(col + 160, 222, 60, 0, 3600)
+        self._grid_w  = ni(col + 100, 78,  12, 4, 1000)
+        self._grid_h  = ni(col + 190, 78,  12, 4, 1000)
+        self._rob_min = ni(col + 100, 115,  2, 1, 1000)
+        self._rob_max = ni(col + 190, 115,  8, 1, 1000)
+        self._rob_step= ni(col + 280, 115,  2, 1, 100)
+        self._scen_n  = ni(col + 160, 150,  3, 1, 100)
+        self._obs_pct      = ni(col + 160, 186, 15, 0, 70)
+        self._timeout      = ni(col + 160, 222, 60, 0, 3600)
+        self._plan_timeout = ni(col + 160, 258, 30, 0, 3600)
 
         self._inputs = [
             self._grid_w, self._grid_h,
             self._rob_min, self._rob_max, self._rob_step,
-            self._scen_n, self._obs_pct, self._timeout,
+            self._scen_n, self._obs_pct,
+            self._timeout, self._plan_timeout,
         ]
 
-        # Placement radio
+        # Placement radio (shifted down by 36 px to make room for plan timeout)
         self._placement_radio = RadioGroup(
             self._PLACEMENT_OPTS,
-            (col, 264, 560, 28),
+            (col, 300, 560, 28),
             self._fs,
         )
 
@@ -212,7 +214,7 @@ class BatchMapScreen:
 
         # Imported maps list
         self._imported: list[str] = []
-        self._import_btn = Button((col, 330, 200, 32), "Import Maps (JSON)",
+        self._import_btn = Button((col, 366, 220, 32), "Import Maps (JSON / .map)",
                                   self._fs)
 
         # Bottom buttons
@@ -261,8 +263,13 @@ class BatchMapScreen:
             root.withdraw()
             root.attributes("-topmost", True)
             paths = filedialog.askopenfilenames(
-                title="Select scenario JSON files",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Select map files",
+                filetypes=[
+                    ("Map files", "*.json *.map"),
+                    ("JSON files", "*.json"),
+                    ("MovingAI maps", "*.map"),
+                    ("All files", "*.*"),
+                ],
             )
             root.destroy()
             if paths:
@@ -285,6 +292,7 @@ class BatchMapScreen:
             check_reachability=self._check_reach,
             imported_maps=self._imported,
             timeout_s=float(self._timeout.get_value()),
+            plan_timeout_s=float(self._plan_timeout.get_value()),
             output_dir="batch_results",
         )
 
@@ -324,32 +332,38 @@ class BatchMapScreen:
         _label(self.screen, self._fs, "Obstacle density %:", col, y + 7)
         self._obs_pct.draw(self.screen)
 
-        # Timeout
+        # Simulation timeout
         y = 202
-        _label(self.screen, self._fs, "Timeout per run (s):", col, y + 7)
+        _label(self.screen, self._fs, "Sim timeout per run (s):", col, y + 7)
         self._timeout.draw(self.screen)
         _label(self.screen, self._fs, "0 = no limit", col + 240, y + 7)
 
-        # Placement radio
+        # Planning timeout
+        y = 238
+        _label(self.screen, self._fs, "Plan timeout per run (s):", col, y + 7)
+        self._plan_timeout.draw(self.screen)
+        _label(self.screen, self._fs, "0 = no limit", col + 240, y + 7)
+
+        # Placement radio (shifted down)
         self.screen.blit(
             self._fs.render("Placement strategy:", True, COLORS["text_muted"]),
-            (col, 250),
+            (col, 286),
         )
         self._placement_radio.draw(self.screen)
 
-        # Reachability checkbox
+        # Reachability checkbox (shifted down)
         self._reach_box_rect = _checkbox(
             self.screen,
-            (col, 300, 300, 24),
+            (col, 336, 300, 24),
             self._check_reach,
             self._fs,
             "Check goal reachability (BFS)",
         )
 
-        # Import section
+        # Import section (shifted down)
         self._import_btn.draw(self.screen)
         if self._imported:
-            y_imp = 370
+            y_imp = 406
             n_shown = min(4, len(self._imported))
             for i in range(n_shown):
                 name = os.path.basename(self._imported[i])
