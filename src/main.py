@@ -22,7 +22,7 @@ from core.agent import Agent
 from core.task import Task
 from core.world import World
 from registry import get_planner
-from scenario import SceneData, load_scenario
+from scenario import SceneData, load_map_file, load_scenario
 from simulation.simulator import Simulator
 from ui.algo_select import AlgoSelect
 from ui.batch_ui import (
@@ -86,8 +86,14 @@ def _load_file_dialog() -> str | None:
         root.withdraw()
         root.attributes("-topmost", True)
         path = filedialog.askopenfilename(
-            title="Load Scenario",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Load Map",
+            filetypes=[
+                ("Map files", "*.json *.map *.scen"),
+                ("JSON files", "*.json"),
+                ("MovingAI maps", "*.map"),
+                ("MovingAI scenarios", "*.scen"),
+                ("All files", "*.*"),
+            ],
         )
         root.destroy()
         return path if path else None
@@ -370,7 +376,7 @@ def main():
             path = _load_file_dialog()
             if path:
                 try:
-                    scene = load_scenario(path)
+                    scene = load_map_file(path)
                 except Exception:
                     scene = None
             if scene is None:

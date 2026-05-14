@@ -13,7 +13,7 @@ import random
 from collections import deque
 
 from batch.config import BatchConfig
-from scenario import SceneData, load_scenario
+from scenario import SceneData, load_map_file
 
 
 _MAX_RETRIES = 20   # retries for reachability failures
@@ -217,14 +217,22 @@ class SceneGenerator:
         rng = random.Random(seed)
         map_path = rng.choice(config.imported_maps)
         try:
-            scene = load_scenario(map_path)
+            scene = load_map_file(map_path)
         except Exception:
             return None
 
         obstacles = set(map(tuple, scene.obstacles))
-        n = min(n_robots, len(scene.agent_starts), len(scene.goals))
-        if n < n_robots:
-            return None
+
+        if len(scene.agent_starts) >= n_robots:
+            pairs = list(zip(scene.agent_starts, scene.goals))
+            selected = rng.sample(pairs, n_robots)
+            return SceneData(
+                grid_width=scene.grid_width,
+                grid_height=scene.grid_height,
+                obstacles=scene.obstacles,
+                agent_starts=[s for s, g in selected],
+                goals=[g for s, g in selected],
+            )
 
         place_fn = _PLACEMENT_FNS.get(config.placement, _place_uniform)
         for attempt in range(_MAX_RETRIES):
