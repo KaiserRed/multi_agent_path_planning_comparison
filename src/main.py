@@ -36,9 +36,9 @@ from visualization.render import draw_simulation, _SIDE_W as SIM_SIDE_W
 
 # Helpers
 def _editor_win_size(scene: SceneData) -> tuple[int, int]:
-    cs = _fit_cell(scene.grid_width, scene.grid_height, 720, 660)
-    w = max(scene.grid_width * cs + EDITOR_SIDE_W + 20, 640)
-    h = max(scene.grid_height * cs + 20, 520)
+    cs = _fit_cell(scene.grid_width, scene.grid_height, 860, 760)
+    w = max(scene.grid_width * cs + EDITOR_SIDE_W + 20, 800)
+    h = max(scene.grid_height * cs + 20, 620)
     return w, h
 
 
@@ -106,7 +106,7 @@ def run_menu(clock: pygame.time.Clock) -> str | None:
     """
     Show the main menu.  Returns ``"create"``, ``"load"``, or ``None`` (quit).
     """
-    screen = pygame.display.set_mode((MENU_W, MENU_H))
+    screen = pygame.display.set_mode((MENU_W, MENU_H), pygame.RESIZABLE)
     pygame.display.set_caption("Multi-Robot System Evaluator")
     menu = MainMenu(screen)
 
@@ -116,6 +116,8 @@ def run_menu(clock: pygame.time.Clock) -> str | None:
         for e in events:
             if e.type == pygame.QUIT:
                 return None
+            if e.type == pygame.WINDOWRESIZED:
+                menu.reflow()
 
         result = menu.handle_events(events)
         menu.update()
@@ -136,7 +138,7 @@ def run_editor(
         scene = SceneData()
 
     win_w, win_h = _editor_win_size(scene)
-    screen = pygame.display.set_mode((win_w, win_h))
+    screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
     pygame.display.set_caption("World Editor")
 
     editor = WorldEditor(screen, scene)
@@ -148,6 +150,8 @@ def run_editor(
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if e.type == pygame.WINDOWRESIZED:
+                editor.reflow()
 
         result = editor.handle_events(events)
         editor.update(dt)
@@ -169,7 +173,7 @@ def run_algo_select(
     or ``None`` on window close.
     """
     win_w, win_h = _editor_win_size(scene)
-    screen = pygame.display.set_mode((win_w, win_h))
+    screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
     pygame.display.set_caption("Select Algorithm")
 
     selector = AlgoSelect(screen, scene)
@@ -181,6 +185,8 @@ def run_algo_select(
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if e.type == pygame.WINDOWRESIZED:
+                selector.reflow()
 
         result = selector.handle_events(events)
         selector.update()
@@ -214,7 +220,7 @@ def run_simulation(
 
     cs = _cell_size(world)
     win_w, win_h = _sim_win_size(world)
-    screen = pygame.display.set_mode((win_w, win_h))
+    screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
     pygame.display.set_caption(f"Simulation — {algo_name}")
 
     font_h = pygame.font.SysFont("Arial", 14, bold=True)
@@ -275,10 +281,9 @@ def run_simulation(
         )
 
 
-# Batch runner
 def run_batch(clock: pygame.time.Clock) -> None:
     """Three-screen Batch Mode flow."""
-    screen = pygame.display.set_mode((BATCH_W, BATCH_H))
+    screen = pygame.display.set_mode((BATCH_W, BATCH_H), pygame.RESIZABLE)
     pygame.display.set_caption("Batch Mode")
 
     #  Screen 1: algorithm selection 
@@ -290,6 +295,8 @@ def run_batch(clock: pygame.time.Clock) -> None:
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if e.type == pygame.WINDOWRESIZED:
+                algo_screen.reflow()
         result = algo_screen.handle_events(events)
         algo_screen.update()
         algo_screen.draw()
@@ -309,6 +316,8 @@ def run_batch(clock: pygame.time.Clock) -> None:
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if e.type == pygame.WINDOWRESIZED:
+                map_screen.reflow()
         result = map_screen.handle_events(events)
         map_screen.update(dt)
         map_screen.draw()
@@ -322,6 +331,8 @@ def run_batch(clock: pygame.time.Clock) -> None:
                     if e.type == pygame.QUIT:
                         pygame.quit()
                         sys.exit()
+                    if e.type == pygame.WINDOWRESIZED:
+                        algo_screen.reflow()
                 result2 = algo_screen.handle_events(events)
                 algo_screen.update()
                 algo_screen.draw()
@@ -346,6 +357,8 @@ def run_batch(clock: pygame.time.Clock) -> None:
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if e.type == pygame.WINDOWRESIZED:
+                progress_screen.reflow()
         result = progress_screen.handle_events(events)
         progress_screen.update()
         progress_screen.draw()

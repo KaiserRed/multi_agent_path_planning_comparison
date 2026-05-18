@@ -57,6 +57,11 @@ class AlgoSelect:
         self.ox = max(5, (avail_w - self.cs * self.scene.grid_width) // 2)
         self.oy = max(5, (avail_h - self.cs * self.scene.grid_height) // 2)
 
+    def reflow(self):
+        """Recompute layout and rebuild widgets after window resize."""
+        self._layout()
+        self._build_widgets()
+
     def _build_widgets(self):
         W, H = self.screen.get_size()
         sx = W - SIDE_W + 10
@@ -237,7 +242,6 @@ class AlgoSelect:
             )
             info_y += 16
             desc = algo.DESCRIPTION
-            # Word-wrap description to ~30 chars per line
             for line in _wrap(desc, 34):
                 self.screen.blit(
                     self._ft.render(line, True, COLORS["text_muted"]),
@@ -256,7 +260,6 @@ class AlgoSelect:
         ng = len(self.scene.goals)
         gw, gh = self.scene.grid_width, self.scene.grid_height
 
-        # Label goals as "Tasks" for MRTA to clarify semantics
         goal_label = "Tasks" if self._sel_type == "MRTA" else "Goals"
         for label in [f"Grid: {gw}×{gh}", f"Agents: {na}",
                       f"{goal_label}: {ng}"]:

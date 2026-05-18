@@ -19,10 +19,10 @@ from registry import ALGORITHMS
 from ui.widgets import Button, RadioGroup, NumberInput, COLORS, draw_panel
 
 
-BATCH_W, BATCH_H = 880, 620
+BATCH_W, BATCH_H = 1000, 700
 _COL1_X = 30
-_COL2_X = 310
-_COL3_X = 590
+_COL2_X = 340
+_COL3_X = 650
 
 
 
@@ -74,13 +74,18 @@ class BatchAlgoScreen:
         self._mapf_sel = [True] * len(self._mapf_names)
         self._mrta_sel = [True] * len(self._mrta_names)
 
-        W, H = BATCH_W, BATCH_H
-        self._next_btn = Button((W - 200, H - 56, 170, 42), "Next →", self._fb,
-                                primary=True)
-        self._back_btn = Button((30, H - 56, 120, 42), "← Back", self._fb)
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._next_btn = Button(dummy, "Next →", self._fb, primary=True)
+        self._back_btn = Button(dummy, "← Back", self._fb)
+        self.reflow()
 
         self._mapf_rects: list[pygame.Rect] = []
         self._mrta_rects: list[pygame.Rect] = []
+
+    def reflow(self):
+        W, H = self.screen.get_size()
+        self._next_btn.rect = pygame.Rect(W - 200, H - 56, 170, 42)
+        self._back_btn.rect = pygame.Rect(30, H - 56, 120, 42)
 
     def handle_events(self, events: list) -> str | None:
         for e in events:
@@ -110,12 +115,14 @@ class BatchAlgoScreen:
         return mapf, mrta
 
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 
         t = self._fh.render("BATCH MODE — Select Algorithms", True, COLORS["accent"])
         self.screen.blit(t, t.get_rect(centerx=W // 2, y=22))
+
+        col2 = max(_COL2_X, W // 3)
 
         # MAPF column
         y = 70
@@ -123,7 +130,7 @@ class BatchAlgoScreen:
         self._mapf_rects = []
         for i, name in enumerate(self._mapf_names):
             box = _checkbox(self.screen,
-                            (_COL1_X, y, 250, 28),
+                            (_COL1_X, y, col2 - _COL1_X - 10, 28),
                             self._mapf_sel[i],
                             self._fs, name)
             self._mapf_rects.append(box)
@@ -131,11 +138,11 @@ class BatchAlgoScreen:
 
         # MRTA column
         y = 70
-        y = _section(self.screen, self._fb, "MRTA Algorithms", _COL2_X, y)
+        y = _section(self.screen, self._fb, "MRTA Algorithms", col2, y)
         self._mrta_rects = []
         for i, name in enumerate(self._mrta_names):
             box = _checkbox(self.screen,
-                            (_COL2_X, y, 250, 28),
+                            (col2, y, W - col2 - 30, 28),
                             self._mrta_sel[i],
                             self._fs, name)
             self._mrta_rects.append(box)
@@ -223,10 +230,16 @@ class BatchMapScreen:
         self._clear_scen_btn     = Button((col + 440, 366, 60, 32),
                                           "Clear", self._fs)
 
-        self._run_btn  = Button((W - 200, H - 56, 170, 42), "▶ Run", self._fb,
-                                primary=True)
-        self._back_btn = Button((col, H - 56, 120, 42), "← Back", self._fb)
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._run_btn  = Button(dummy, "▶ Run", self._fb, primary=True)
+        self._back_btn = Button(dummy, "← Back", self._fb)
+        self.reflow()
 
+    def reflow(self):
+        W, H = self.screen.get_size()
+        col = _COL1_X
+        self._run_btn.rect  = pygame.Rect(W - 200, H - 56, 170, 42)
+        self._back_btn.rect = pygame.Rect(col, H - 56, 120, 42)
 
     @property
     def _scen_mode(self) -> bool:
@@ -348,7 +361,7 @@ class BatchMapScreen:
 
 
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 
@@ -475,7 +488,8 @@ class BatchMapScreen:
             f"{cfg.scenarios_per_n} seeds = {total}",
             True, COLORS["text"],
         )
-        self.screen.blit(summary, summary.get_rect(centerx=W // 2, y=H - 80))
+        W2, H2 = self.screen.get_size()
+        self.screen.blit(summary, summary.get_rect(centerx=W2 // 2, y=H2 - 80))
 
         self._run_btn.draw(self.screen)
         self._back_btn.draw(self.screen)
@@ -497,11 +511,10 @@ class BatchProgressScreen:
         self._fb = pygame.font.SysFont("Arial", 14)
         self._fs = pygame.font.SysFont("Arial", 12)
 
-        W, H = BATCH_W, BATCH_H
-        self._menu_btn = Button((W // 2 - 90, H - 60, 180, 42),
-                                "Back to Menu", self._fb)
-        self._open_btn = Button((W // 2 + 100, H - 60, 160, 42),
-                                "Open Folder", self._fs)
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._menu_btn = Button(dummy, "Back to Menu", self._fb)
+        self._open_btn = Button(dummy, "Open Folder", self._fs)
+        self.reflow()
 
         self._fraction: float = 0.0
         self._current_label: str = "Initializing…"
@@ -511,6 +524,11 @@ class BatchProgressScreen:
         self._lock = threading.Lock()
 
         self._start_runner()
+
+    def reflow(self):
+        W, H = self.screen.get_size()
+        self._menu_btn.rect = pygame.Rect(W // 2 - 90,  H - 60, 180, 42)
+        self._open_btn.rect = pygame.Rect(W // 2 + 100, H - 60, 160, 42)
 
     def _start_runner(self):
         def _target():
@@ -564,7 +582,7 @@ class BatchProgressScreen:
             pass
 
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 

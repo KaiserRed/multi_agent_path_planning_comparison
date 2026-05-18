@@ -46,7 +46,6 @@ def _fit_cell(grid_w: int, grid_h: int, avail_w: int, avail_h: int) -> int:
 
 
 
-# Grid-preview helper (reused by algo_select)
 def draw_scene_preview(
     surface: pygame.Surface,
     grid_w: int, grid_h: int,
@@ -64,7 +63,6 @@ def draw_scene_preview(
             pygame.draw.rect(surface, bg, rect)
             pygame.draw.rect(surface, (46, 59, 96), rect, 1)
 
-    # Goals — green diamond
     goal_set = set() if isinstance(goals, set) else goals
     for idx, (gx, gy) in enumerate(goals):
         cx = ox + gx * cs + cs // 2
@@ -76,7 +74,6 @@ def draw_scene_preview(
             t = font_small.render(f"G{idx}", True, (20, 20, 20))
             surface.blit(t, t.get_rect(center=(cx, cy)))
 
-    # Agent starts — coloured squares
     pad = max(2, cs // 7)
     for idx, (sx, sy) in enumerate(agent_starts):
         color = AGENT_COLORS[idx % len(AGENT_COLORS)]
@@ -89,7 +86,6 @@ def draw_scene_preview(
             t = font_small.render(f"A{idx}", True, (255, 255, 255))
             surface.blit(t, t.get_rect(center=rect.center))
 
-    # Hover
     if hover_cell:
         rx = ox + hover_cell[0] * cs
         ry = oy + hover_cell[1] * cs
@@ -142,6 +138,11 @@ class WorldEditor:
         self._saved_msg: str | None = None
         self._saved_timer: int = 0
 
+        self._view_scale: float = 1.0
+        self._view_pan: list[float] = [0.0, 0.0]
+        self._pan_dragging: bool = False
+        self._pan_last: tuple[int, int] = (0, 0)
+
     def _layout(self):
         W, H = self.screen.get_size()
         avail_w = W - SIDE_W - 10
@@ -150,12 +151,16 @@ class WorldEditor:
         self.ox = max(5, (avail_w - self.cs * self.grid_w) // 2)
         self.oy = max(5, (avail_h - self.cs * self.grid_h) // 2)
 
+    def reflow(self):
+        """Recompute grid layout and rebuild all widgets after window resize."""
+        self._layout()
+        self._build_widgets()
+
     def _build_widgets(self):
         W, H = self.screen.get_size()
         sx = W - SIDE_W + 10
         sw = SIDE_W - 20
 
-        # Grid size inputs
         half = (sw - 30) // 2
         self._w_input = NumberInput(
             (sx, 38, half, 28), self.grid_w, self._fs, 3, 1000,
@@ -167,14 +172,12 @@ class WorldEditor:
             (sx, 72, sw, 28), "Apply Size", self._ft,
         )
 
-        # Tool buttons
         self._tool_btns: list[Button] = []
         for i, name in enumerate(self.TOOLS):
             btn = Button((sx, 120 + i * 38, sw, 32), name, self._fb)
             btn.active = (name == self.tool)
             self._tool_btns.append(btn)
 
-        # Action buttons (from bottom)
         self._cancel_btn = Button((sx, H - 42, sw, 30), "Cancel", self._fs)
         self._done_btn = Button(
             (sx, H - 80, sw, 34), "Done", self._fb, primary=True,
@@ -185,10 +188,23 @@ class WorldEditor:
 
         self._inputs = [self._w_input, self._h_input]
 
-    # Cell helpers
+    def _effective_layout(self) -> tuple[int, int, int]:
+        """Return (effective_cell_size, effective_ox, effective_oy) with zoom/pan."""
+        ecs = max(1, int(self.cs * self._view_scale))
+        eox = self.ox + int(self._view_pan[0])
+        eoy = self.oy + int(self._view_pan[1])
+        return ecs, eox, eoy
+
+    def _reset_view(self):
+        self._view_scale = 1.0
+        self._view_pan = [0.0, 0.0]
+
     def _cell_at(self, mx: int, my: int) -> tuple | None:
-        gx = (mx - self.ox) // self.cs
-        gy = (my - self.oy) // self.cs
+        ecs, eox, eoy = self._effective_layout()
+        if ecs < 1:
+            return None
+        gx = (mx - eox) // ecs
+        gy = (my - eoy) // ecs
         if 0 <= gx < self.grid_w and 0 <= gy < self.grid_h:
             return (int(gx), int(gy))
         return None
@@ -223,7 +239,6 @@ class WorldEditor:
             if self._is_empty(cell) and len(self.goals) < 50:
                 self.goals.append(cell)
 
-    # Grid resize
     def _apply_resize(self):
         new_w = self._w_input.get_value()
         new_h = self._h_input.get_value()
@@ -242,7 +257,6 @@ class WorldEditor:
         ]
         self._layout()
 
-    # File load / save
     def _do_load(self):
         try:
             import tkinter as tk
@@ -304,7 +318,6 @@ class WorldEditor:
             self._saved_msg = "Saved!"
             self._saved_timer = 2000
 
-    # Public API
     def get_scene_data(self) -> SceneData:
         return SceneData(
             grid_width=self.grid_w,
@@ -314,32 +327,59 @@ class WorldEditor:
             goals=list(self.goals),
         )
 
-    # Events
     def handle_events(self, events: list) -> str | None:
         any_input_active = any(inp.active for inp in self._inputs)
+        W, H = self.screen.get_size()
+        grid_right = W - SIDE_W 
 
         for event in events:
-            # Keyboard
+            # Zoom
+            if event.type == pygame.MOUSEWHEEL:
+                mx, my = pygame.mouse.get_pos()
+                if mx < grid_right:
+                    factor = 1.15 if event.y > 0 else (1.0 / 1.15)
+                    old_scale = self._view_scale
+                    new_scale = max(0.15, min(10.0, old_scale * factor))
+                    if new_scale != old_scale:
+                        old_pan_x, old_pan_y = self._view_pan
+                        ratio = new_scale / old_scale
+                        self._view_pan[0] = mx - self.ox - (mx - self.ox - old_pan_x) * ratio
+                        self._view_pan[1] = my - self.oy - (my - self.oy - old_pan_y) * ratio
+                        self._view_scale = new_scale
+
+            # Pan
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:
+                if event.pos[0] < grid_right:
+                    self._pan_dragging = True
+                    self._pan_last = event.pos
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 2:
+                self._pan_dragging = False
+            elif event.type == pygame.MOUSEMOTION and self._pan_dragging:
+                dx = event.pos[0] - self._pan_last[0]
+                dy = event.pos[1] - self._pan_last[1]
+                self._view_pan[0] += dx
+                self._view_pan[1] += dy
+                self._pan_last = event.pos
+
             if event.type == pygame.KEYDOWN and not any_input_active:
                 if event.key == pygame.K_ESCAPE:
                     return "cancel"
+                if event.key in (pygame.K_0, pygame.K_KP0, pygame.K_HOME):
+                    self._reset_view()
                 for i, name in enumerate(self.TOOLS):
                     if event.unicode == str(i + 1):
                         self._select_tool(name)
 
-            # Grid size inputs
             for inp in self._inputs:
                 inp.handle_event(event)
 
             if self._apply_btn.handle_event(event):
                 self._apply_resize()
 
-            # Tool buttons
             for btn in self._tool_btns:
                 if btn.handle_event(event):
                     self._select_tool(btn.text)
 
-            # Action buttons
             if self._load_btn.handle_event(event):
                 self._do_load()
 
@@ -360,18 +400,18 @@ class WorldEditor:
             if self._cancel_btn.handle_event(event):
                 return "cancel"
 
-            # Mouse on grid
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                cell = self._cell_at(*event.pos)
-                if cell:
-                    self._dragging = True
-                    self._drag_right = (event.button == 3)
-                    self._drag_last = cell
-                    self._apply(cell, self._drag_right)
-            elif event.type == pygame.MOUSEBUTTONUP:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
+                if not self._pan_dragging and event.pos[0] < grid_right:
+                    cell = self._cell_at(*event.pos)
+                    if cell:
+                        self._dragging = True
+                        self._drag_right = (event.button == 3)
+                        self._drag_last = cell
+                        self._apply(cell, self._drag_right)
+            elif event.type == pygame.MOUSEBUTTONUP and event.button in (1, 3):
                 self._dragging = False
                 self._drag_last = None
-            elif event.type == pygame.MOUSEMOTION and self._dragging:
+            elif event.type == pygame.MOUSEMOTION and self._dragging and not self._pan_dragging:
                 cell = self._cell_at(*event.pos)
                 if cell and cell != self._drag_last:
                     self._drag_last = cell
@@ -391,7 +431,6 @@ class WorldEditor:
             return "Place at least one Goal"
         return None
 
-    # Update
     def update(self, dt_ms: int = 16):
         for btn in self._tool_btns:
             btn.update()
@@ -409,18 +448,24 @@ class WorldEditor:
             if self._saved_timer <= 0:
                 self._saved_msg = None
 
-    # Drawing
     def draw(self):
         self.screen.fill(COLORS["bg"])
         mx, my = pygame.mouse.get_pos()
         hover = self._cell_at(mx, my)
+
+        ecs, eox, eoy = self._effective_layout()
+
+        W, H = self.screen.get_size()
+        self.screen.set_clip(pygame.Rect(0, 0, W - SIDE_W, H))
         draw_scene_preview(
             self.screen,
             self.grid_w, self.grid_h,
             self.obstacles, self.agent_starts, self.goals,
-            self.cs, self.ox, self.oy,
+            ecs, eox, eoy,
             self._ft, hover,
         )
+        self.screen.set_clip(None)
+
         self._draw_side_panel()
         pygame.display.flip()
 
@@ -431,11 +476,9 @@ class WorldEditor:
         draw_panel(self.screen, (sx, 0, SIDE_W, H), alpha=235, radius=0)
         cx = sx + SIDE_W // 2
 
-        # Title
         t = self._fh.render("EDITOR", True, COLORS["accent"])
         self.screen.blit(t, t.get_rect(centerx=cx, y=10))
 
-        # Grid size label + inputs
         self.screen.blit(
             self._fs.render("Grid size:", True, COLORS["text_muted"]),
             (sx + 10, 28),
@@ -449,19 +492,16 @@ class WorldEditor:
         self._h_input.draw(self.screen)
         self._apply_btn.draw(self.screen)
 
-        # Tool buttons
         lbl = self._fh.render("TOOLS", True, COLORS["accent"])
         self.screen.blit(lbl, (sx + 10, 106))
         for btn in self._tool_btns:
             btn.draw(self.screen)
 
-        # Keyboard hints
         hy = 120 + len(self.TOOLS) * 38 + 4
         for i, name in enumerate(self.TOOLS):
             s = self._ft.render(f"[{i + 1}] {name}", True, COLORS["text_muted"])
             self.screen.blit(s, (sx + 10, hy + i * 15))
 
-        # Placed counts
         cnt_y = hy + len(self.TOOLS) * 15 + 12
         self.screen.blit(
             self._fh.render("PLACED", True, COLORS["accent"]),
@@ -478,7 +518,6 @@ class WorldEditor:
             self.screen.blit(s, (sx + 10, cnt_y))
             cnt_y += 18
 
-        # Color legend
         cnt_y += 8
         self.screen.blit(
             self._fh.render("COLORS", True, COLORS["accent"]),
@@ -495,26 +534,27 @@ class WorldEditor:
             s = self._ft.render(f"Agent {i}", True, COLORS["text_muted"])
             self.screen.blit(s, (sx + 28, cnt_y + i * 16))
 
-        # Saved message
         if self._saved_msg:
             sm = self._fs.render(self._saved_msg, True, COLORS["success"])
             self.screen.blit(sm, sm.get_rect(centerx=cx, y=H - 170))
 
-        # Error message
         if self._error:
             err = self._fs.render(self._error, True, COLORS["error"])
             self.screen.blit(err, err.get_rect(centerx=cx, y=H - 170))
 
-        # Action buttons
         self._load_btn.draw(self.screen)
         self._save_btn.draw(self.screen)
         self._clear_btn.draw(self.screen)
         self._done_btn.draw(self.screen)
         self._cancel_btn.draw(self.screen)
 
-        # Bottom hint
         hint = self._ft.render(
             "LMB: place  ·  RMB: erase  ·  Drag: paint",
             True, COLORS["text_muted"],
         )
-        self.screen.blit(hint, hint.get_rect(x=5, bottom=H - 2))
+        self.screen.blit(hint, hint.get_rect(x=5, bottom=H - 14))
+        hint2 = self._ft.render(
+            "Scroll: zoom  ·  MMB drag: pan  ·  0/Home: reset",
+            True, COLORS["text_muted"],
+        )
+        self.screen.blit(hint2, hint2.get_rect(x=5, bottom=H - 2))
