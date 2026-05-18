@@ -19,6 +19,7 @@ from mrta.min_cost_flow import MinCostFlowPlanner
 from mrta.sequential_auction import SequentialAuctionPlanner
 from mrta.greedy import GreedyPlanner
 from mrta.combinatorial_auction import CombinatorialAuctionPlanner
+from mrta.random_assign import RandomPlanner
 
 # Registry 
 ALGORITHMS: dict = {
@@ -38,6 +39,7 @@ ALGORITHMS: dict = {
         SequentialAuctionPlanner(),
         GreedyPlanner(),
         CombinatorialAuctionPlanner(),
+        RandomPlanner(),
     ],
 }
 

@@ -13,7 +13,7 @@ class BatchConfig:
     robot_step: int = 2
 
     # Map / scenario generation
-    scenarios_per_n: int = 3          
+    scenarios_per_n: int = 3
     grid_w: int = 12
     grid_h: int = 12
     obstacle_density: float = 0.15
@@ -21,6 +21,8 @@ class BatchConfig:
     check_reachability: bool = True
 
     imported_maps: list[str] = field(default_factory=list)
+
+    scen_files: list[str] = field(default_factory=list)
 
     timeout_s: float = 60.0           # 0 = no timeout (simulation phase)
     plan_timeout_s: float = 30.0      # 0 = no timeout (planning phase)

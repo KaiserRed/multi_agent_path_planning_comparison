@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import gc
 import os
+import random as _rnd
 import threading
 import time as _time
 from typing import Callable
@@ -29,6 +30,8 @@ _GENERATOR = SceneGenerator()
 
 COLUMNS = [
     "mrta_algo", "mapf_algo", "n_robots", "scenario_seed",
+    "map_width", "map_height", "obstacle_density", "placement",
+    "scene_source",
     "success", "makespan", "soc",
     "plan_total_s", "plan_mrta_s", "plan_mapf_s", "memory_mb",
 ]
@@ -92,7 +95,7 @@ def _run_single(
         def _do_plan():
             try:
                 plan_result[0] = sim.plan()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc: 
                 plan_exc[0] = exc
 
         plan_thread = threading.Thread(target=_do_plan, daemon=True)
@@ -209,12 +212,29 @@ class BatchRunner:
                         )
 
                         scene = _GENERATOR.generate(config, n_robots, seed)
+
+                        if config.scen_files:
+                            _picked = _rnd.Random(seed).choice(config.scen_files)
+                            scene_source = f"scen:{os.path.basename(_picked)}"
+                            placement_label = "scen"
+                        elif config.imported_maps:
+                            scene_source = "imported"
+                            placement_label = "imported"
+                        else:
+                            scene_source = "random"
+                            placement_label = config.placement
+
                         if scene is None:
                             row = {
                                 "mrta_algo": mrta_name,
                                 "mapf_algo": mapf_name,
                                 "n_robots": n_robots,
                                 "scenario_seed": seed,
+                                "map_width": 0,
+                                "map_height": 0,
+                                "obstacle_density": 0.0,
+                                "placement": placement_label,
+                                "scene_source": scene_source,
                                 "success": False,
                                 "makespan": 0,
                                 "soc": 0,
@@ -231,6 +251,14 @@ class BatchRunner:
                             )
                             row["scenario_seed"] = seed
                             row["n_robots"] = n_robots
+                            w, h = scene.grid_width, scene.grid_height
+                            row["map_width"] = w
+                            row["map_height"] = h
+                            row["obstacle_density"] = round(
+                                len(scene.obstacles) / (w * h), 4
+                            ) if w * h > 0 else 0.0
+                            row["placement"] = placement_label
+                            row["scene_source"] = scene_source
 
                         gc.collect()
 
