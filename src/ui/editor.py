@@ -20,6 +20,7 @@ from __future__ import annotations
 import pygame
 
 from scenario import SceneData, load_map_file, save_scenario
+from ui.dialogs import open_file, save_file
 from ui.widgets import COLORS, Button, NumberInput, draw_panel
 
 AGENT_COLORS = [
@@ -258,26 +259,16 @@ class WorldEditor:
         self._layout()
 
     def _do_load(self):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            path = filedialog.askopenfilename(
-                title="Load Map",
-                filetypes=[
-                    ("Map files", "*.json *.map *.scen"),
-                    ("JSON files", "*.json"),
-                    ("MovingAI maps", "*.map"),
-                    ("MovingAI scenarios", "*.scen"),
-                    ("All files", "*.*"),
-                ],
-            )
-            root.destroy()
-        except Exception:
-            path = None
-
+        path = open_file(
+            title="Load Map",
+            filetypes=[
+                ("Map files", "*.json *.map *.scen"),
+                ("JSON files", "*.json"),
+                ("MovingAI maps", "*.map"),
+                ("MovingAI scenarios", "*.scen"),
+                ("All files", "*"),
+            ],
+        )
         if not path:
             return
         try:
@@ -298,21 +289,11 @@ class WorldEditor:
         self._build_widgets()
 
     def _do_save(self):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            path = filedialog.asksaveasfilename(
-                title="Save Scenario",
-                defaultextension=".json",
-                filetypes=[("JSON files", "*.json")],
-            )
-            root.destroy()
-        except Exception:
-            path = None
-
+        path = save_file(
+            title="Save Scenario",
+            filetypes=[("JSON files", "*.json")],
+            default_ext=".json",
+        )
         if path:
             save_scenario(self.get_scene_data(), path)
             self._saved_msg = "Saved!"

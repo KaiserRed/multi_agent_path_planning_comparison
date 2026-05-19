@@ -16,6 +16,7 @@ import pygame
 
 from batch.config import BatchConfig
 from registry import ALGORITHMS
+from ui.dialogs import open_files
 from ui.widgets import Button, RadioGroup, NumberInput, COLORS, draw_panel
 
 
@@ -295,48 +296,30 @@ class BatchMapScreen:
 
 
     def _open_import_dialog(self):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            paths = filedialog.askopenfilenames(
-                title="Select map files",
-                filetypes=[
-                    ("Map files", "*.json *.map"),
-                    ("JSON files", "*.json"),
-                    ("MovingAI maps", "*.map"),
-                    ("All files", "*.*"),
-                ],
-            )
-            root.destroy()
-            if paths:
-                self._imported = list(paths)
-                self._scen_files = []  
-        except Exception:
-            pass
+        paths = open_files(
+            title="Select map files",
+            filetypes=[
+                ("Map files", "*.json *.map"),
+                ("JSON files", "*.json"),
+                ("MovingAI maps", "*.map"),
+                ("All files", "*"),
+            ],
+        )
+        if paths:
+            self._imported = paths
+            self._scen_files = []
 
     def _open_scen_dialog(self):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            paths = filedialog.askopenfilenames(
-                title="Select MovingAI .scen files",
-                filetypes=[
-                    ("MovingAI scenarios", "*.scen"),
-                    ("All files", "*.*"),
-                ],
-            )
-            root.destroy()
-            if paths:
-                self._scen_files = list(paths)
-                self._imported = []    
-        except Exception:
-            pass
+        paths = open_files(
+            title="Select MovingAI .scen files",
+            filetypes=[
+                ("MovingAI scenarios", "*.scen"),
+                ("All files", "*"),
+            ],
+        )
+        if paths:
+            self._scen_files = paths
+            self._imported = []
 
 
     def build_config(self) -> BatchConfig:

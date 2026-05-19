@@ -78,27 +78,18 @@ def _build_scene(scene: SceneData, algo_type: str):
 
 
 def _load_file_dialog() -> str | None:
-    """Open a native file-open dialog (tkinter) and return the chosen path."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        path = filedialog.askopenfilename(
-            title="Load Map",
-            filetypes=[
-                ("Map files", "*.json *.map *.scen"),
-                ("JSON files", "*.json"),
-                ("MovingAI maps", "*.map"),
-                ("MovingAI scenarios", "*.scen"),
-                ("All files", "*.*"),
-            ],
-        )
-        root.destroy()
-        return path if path else None
-    except Exception:
-        return None
+    """Open a native file-open dialog and return the chosen path."""
+    from ui.dialogs import open_file
+    return open_file(
+        title="Load Map",
+        filetypes=[
+            ("Map files", "*.json *.map *.scen"),
+            ("JSON files", "*.json"),
+            ("MovingAI maps", "*.map"),
+            ("MovingAI scenarios", "*.scen"),
+            ("All files", "*"),
+        ],
+    )
 
 
 # Screen runners
