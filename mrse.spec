@@ -25,6 +25,7 @@ a = Analysis(
         # MAPF planners
         "mapf.planner",
         "mapf.a_star",
+        "mapf.focal_a_star",
         "mapf.cbs",
         "mapf.cbs.cbs",
         "mapf.ecbs",
@@ -40,6 +41,8 @@ a = Analysis(
         "mapf.ca_star.ca_star",
         "mapf.whca_star",
         "mapf.whca_star.whca_star",
+        "mapf.sipp",
+        "mapf.sipp.sipp",
         # MRTA planners
         "mrta.planner",
         "mrta.hungarian",
@@ -47,6 +50,12 @@ a = Analysis(
         "mrta.sequential_auction",
         "mrta.greedy",
         "mrta.combinatorial_auction",
+        "mrta.random_assign",
+        # Batch mode
+        "batch.config",
+        "batch.generator",
+        "batch.plotter",
+        "batch.runner",
         # Core
         "core.agent",
         "core.task",
@@ -56,6 +65,8 @@ a = Analysis(
         "scenario",
         "simulation.simulator",
         "ui.algo_select",
+        "ui.batch_ui",
+        "ui.dialogs",
         "ui.editor",
         "ui.menu",
         "ui.widgets",
@@ -70,7 +81,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["matplotlib", "pandas", "IPython", "jupyter"],
+    excludes=["IPython", "jupyter"],
     noarchive=False,
     optimize=1,
 )
