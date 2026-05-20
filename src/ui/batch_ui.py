@@ -364,13 +364,16 @@ class BatchMapScreen:
         _lbl("Grid W:", col, 78 + 7, self._scen_mode)
         self._grid_w.draw(self.screen)
         _lbl("H:", col + 185, 78 + 7, self._scen_mode)
+        self._grid_h.rect.x = col + 210
         self._grid_h.draw(self.screen)
 
         _lbl("Robots  min:", col, 115 + 7)
         self._rob_min.draw(self.screen)
         _lbl("max:", col + 185, 115 + 7)
+        self._rob_max.rect.x = col + 220
         self._rob_max.draw(self.screen)
-        _lbl("step:", col + 275, 115 + 7)
+        _lbl("step:", col + 300, 115 + 7)
+        self._rob_step.rect.x = col + 330
         self._rob_step.draw(self.screen)
 
         _lbl("Scenarios / N:", col, 150 + 7)
