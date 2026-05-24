@@ -16,17 +16,16 @@ import pygame
 
 from batch.config import BatchConfig
 from registry import ALGORITHMS
+from ui.dialogs import open_files
 from ui.widgets import Button, RadioGroup, NumberInput, COLORS, draw_panel
 
 
-#  shared constants 
-BATCH_W, BATCH_H = 880, 620
+BATCH_W, BATCH_H = 1000, 700
 _COL1_X = 30
-_COL2_X = 310
-_COL3_X = 590
+_COL2_X = 340
+_COL3_X = 650
 
 
-# helpers 
 
 def _checkbox(surface, rect, checked: bool, font, label: str):
     """Draw a simple checkbox with a label."""
@@ -76,14 +75,18 @@ class BatchAlgoScreen:
         self._mapf_sel = [True] * len(self._mapf_names)
         self._mrta_sel = [True] * len(self._mrta_names)
 
-        W, H = BATCH_W, BATCH_H
-        self._next_btn = Button((W - 200, H - 56, 170, 42), "Next →", self._fb,
-                                primary=True)
-        self._back_btn = Button((30, H - 56, 120, 42), "← Back", self._fb)
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._next_btn = Button(dummy, "Next →", self._fb, primary=True)
+        self._back_btn = Button(dummy, "← Back", self._fb)
+        self.reflow()
 
-        # hit-rects for checkboxes, built lazily in draw
         self._mapf_rects: list[pygame.Rect] = []
         self._mrta_rects: list[pygame.Rect] = []
+
+    def reflow(self):
+        W, H = self.screen.get_size()
+        self._next_btn.rect = pygame.Rect(W - 200, H - 56, 170, 42)
+        self._back_btn.rect = pygame.Rect(30, H - 56, 120, 42)
 
     def handle_events(self, events: list) -> str | None:
         for e in events:
@@ -113,12 +116,14 @@ class BatchAlgoScreen:
         return mapf, mrta
 
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 
         t = self._fh.render("BATCH MODE — Select Algorithms", True, COLORS["accent"])
         self.screen.blit(t, t.get_rect(centerx=W // 2, y=22))
+
+        col2 = max(_COL2_X, W // 3)
 
         # MAPF column
         y = 70
@@ -126,7 +131,7 @@ class BatchAlgoScreen:
         self._mapf_rects = []
         for i, name in enumerate(self._mapf_names):
             box = _checkbox(self.screen,
-                            (_COL1_X, y, 250, 28),
+                            (_COL1_X, y, col2 - _COL1_X - 10, 28),
                             self._mapf_sel[i],
                             self._fs, name)
             self._mapf_rects.append(box)
@@ -134,17 +139,16 @@ class BatchAlgoScreen:
 
         # MRTA column
         y = 70
-        y = _section(self.screen, self._fb, "MRTA Algorithms", _COL2_X, y)
+        y = _section(self.screen, self._fb, "MRTA Algorithms", col2, y)
         self._mrta_rects = []
         for i, name in enumerate(self._mrta_names):
             box = _checkbox(self.screen,
-                            (_COL2_X, y, 250, 28),
+                            (col2, y, W - col2 - 30, 28),
                             self._mrta_sel[i],
                             self._fs, name)
             self._mrta_rects.append(box)
             y += 30
 
-        # Combination count
         n_mapf = sum(self._mapf_sel)
         n_mrta = sum(self._mrta_sel)
         combo_s = self._fb.render(
@@ -162,6 +166,10 @@ class BatchAlgoScreen:
 class BatchMapScreen:
     """
     Returns ``"run"`` → start batch, ``"back"`` → algo screen.
+
+    When ``.scen`` files are loaded the random-generation controls (grid
+    size, obstacle density, placement strategy, reachability check) are
+    rendered dimmed and ignored — the map geometry comes from the file.
     """
 
     _PLACEMENT_OPTS = ["uniform", "clustered", "counter", "min_dist"]
@@ -178,65 +186,95 @@ class BatchMapScreen:
 
         W, H = BATCH_W, BATCH_H
 
-        # NumberInputs — (label, widget)
         ni = lambda x, y, v, lo, hi: NumberInput(
             (x, y, 72, 28), v, self._fs, min_val=lo, max_val=hi
         )
         col = _COL1_X
-        col2 = _COL2_X
-        self._grid_w  = ni(col + 100, 78,  12, 4, 40)
-        self._grid_h  = ni(col + 190, 78,  12, 4, 40)
-        self._rob_min = ni(col + 100, 115,  2, 1, 50)
-        self._rob_max = ni(col + 190, 115,  8, 1, 50)
-        self._rob_step= ni(col + 280, 115,  2, 1, 20)
-        self._scen_n  = ni(col + 160, 150,  3, 1, 20)
-        self._obs_pct = ni(col + 160, 186, 15, 0, 40)
-        self._timeout = ni(col + 160, 222, 60, 0, 3600)
+        self._grid_w  = ni(col + 100, 78,  12, 4, 1000)
+        self._grid_h  = ni(col + 190, 78,  12, 4, 1000)
+        self._rob_min = ni(col + 100, 115,  2, 1, 1000)
+        self._rob_max = ni(col + 190, 115,  8, 1, 1000)
+        self._rob_step= ni(col + 280, 115,  2, 1, 100)
+        self._scen_n  = ni(col + 160, 150,  3, 1, 100)
+        self._obs_pct      = ni(col + 160, 186, 15, 0, 70)
+        self._timeout      = ni(col + 160, 222, 60, 0, 3600)
+        self._plan_timeout = ni(col + 160, 258, 30, 0, 3600)
 
-        self._inputs = [
-            self._grid_w, self._grid_h,
+        self._inputs_always = [
             self._rob_min, self._rob_max, self._rob_step,
-            self._scen_n, self._obs_pct, self._timeout,
+            self._scen_n, self._timeout, self._plan_timeout,
+        ]
+        self._inputs_gen = [
+            self._grid_w, self._grid_h, self._obs_pct,
         ]
 
-        # Placement radio
         self._placement_radio = RadioGroup(
             self._PLACEMENT_OPTS,
-            (col, 264, 560, 28),
+            (col, 300, 560, 28),
             self._fs,
         )
 
-        # Reachability checkbox
         self._check_reach = True
         self._reach_box_rect: pygame.Rect | None = None
 
-        # Imported maps list
-        self._imported: list[str] = []
-        self._import_btn = Button((col, 330, 200, 32), "Import Maps (JSON)",
-                                  self._fs)
 
-        # Bottom buttons
-        self._run_btn = Button((W - 200, H - 56, 170, 42), "▶ Run", self._fb,
-                               primary=True)
-        self._back_btn = Button((col, H - 56, 120, 42), "← Back", self._fb)
+        self._import_btn = Button((col, 366, 210, 32),
+                                  "Import Maps (JSON/.map)", self._fs)
+        self._scen_btn   = Button((col + 220, 366, 180, 32),
+                                  "Import .scen", self._fs)
+
+        self._imported: list[str] = []
+        self._scen_files: list[str] = []
+
+        self._clear_imported_btn = Button((col + 440, 366, 60, 32),
+                                          "Clear", self._fs)
+        self._clear_scen_btn     = Button((col + 440, 366, 60, 32),
+                                          "Clear", self._fs)
+
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._run_btn  = Button(dummy, "▶ Run", self._fb, primary=True)
+        self._back_btn = Button(dummy, "← Back", self._fb)
+        self.reflow()
+
+    def reflow(self):
+        W, H = self.screen.get_size()
+        col = _COL1_X
+        self._run_btn.rect  = pygame.Rect(W - 200, H - 56, 170, 42)
+        self._back_btn.rect = pygame.Rect(col, H - 56, 120, 42)
+
+    @property
+    def _scen_mode(self) -> bool:
+        """True when .scen files are loaded — disables random-gen controls."""
+        return bool(self._scen_files)
+
 
     def handle_events(self, events: list) -> str | None:
         for e in events:
             if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 return "back"
 
-            for inp in self._inputs:
+            for inp in self._inputs_always:
                 inp.handle_event(e)
 
-            self._placement_radio.handle_event(e)
-
-            if (e.type == pygame.MOUSEBUTTONDOWN and e.button == 1
-                    and self._reach_box_rect
-                    and self._reach_box_rect.collidepoint(e.pos)):
-                self._check_reach = not self._check_reach
+            if not self._scen_mode:
+                for inp in self._inputs_gen:
+                    inp.handle_event(e)
+                self._placement_radio.handle_event(e)
+                if (e.type == pygame.MOUSEBUTTONDOWN and e.button == 1
+                        and self._reach_box_rect
+                        and self._reach_box_rect.collidepoint(e.pos)):
+                    self._check_reach = not self._check_reach
 
             if self._import_btn.handle_event(e):
                 self._open_import_dialog()
+
+            if self._scen_btn.handle_event(e):
+                self._open_scen_dialog()
+
+            if self._imported and self._clear_imported_btn.handle_event(e):
+                self._imported = []
+            if self._scen_files and self._clear_scen_btn.handle_event(e):
+                self._scen_files = []
 
             if self._run_btn.handle_event(e):
                 return "run"
@@ -247,28 +285,42 @@ class BatchMapScreen:
         return None
 
     def update(self, dt: int = 0):
-        for inp in self._inputs:
+        for inp in self._inputs_always + self._inputs_gen:
             inp.update(dt)
         self._import_btn.update()
+        self._scen_btn.update()
+        self._clear_imported_btn.update()
+        self._clear_scen_btn.update()
         self._run_btn.update()
         self._back_btn.update()
 
+
     def _open_import_dialog(self):
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            paths = filedialog.askopenfilenames(
-                title="Select scenario JSON files",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            )
-            root.destroy()
-            if paths:
-                self._imported = list(paths)
-        except Exception:
-            pass
+        paths = open_files(
+            title="Select map files",
+            filetypes=[
+                ("Map files", "*.json *.map"),
+                ("JSON files", "*.json"),
+                ("MovingAI maps", "*.map"),
+                ("All files", "*"),
+            ],
+        )
+        if paths:
+            self._imported = paths
+            self._scen_files = []
+
+    def _open_scen_dialog(self):
+        paths = open_files(
+            title="Select MovingAI .scen files",
+            filetypes=[
+                ("MovingAI scenarios", "*.scen"),
+                ("All files", "*"),
+            ],
+        )
+        if paths:
+            self._scen_files = paths
+            self._imported = []
+
 
     def build_config(self) -> BatchConfig:
         return BatchConfig(
@@ -284,12 +336,15 @@ class BatchMapScreen:
             placement=self._placement_radio.get_value(),
             check_reachability=self._check_reach,
             imported_maps=self._imported,
+            scen_files=self._scen_files,
             timeout_s=float(self._timeout.get_value()),
+            plan_timeout_s=float(self._plan_timeout.get_value()),
             output_dir="batch_results",
         )
 
+
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 
@@ -298,76 +353,118 @@ class BatchMapScreen:
 
         col = _COL1_X
 
-        # Grid size
-        y = 58
-        _label(self.screen, self._fs, "Grid W:", col, y + 7)
+        lbl_gen  = COLORS["text_muted"] if self._scen_mode else COLORS["text_muted"]
+        lbl_dim  = (80, 85, 110)   
+
+        def _lbl(text, x, y, dimmed=False):
+            c = lbl_dim if dimmed else COLORS["text_muted"]
+            s = self._fs.render(text, True, c)
+            self.screen.blit(s, (x, y))
+
+        _lbl("Grid W:", col, 78 + 7, self._scen_mode)
         self._grid_w.draw(self.screen)
-        _label(self.screen, self._fs, "H:", col + 185, y + 7)
+        _lbl("H:", col + 185, 78 + 7, self._scen_mode)
+        self._grid_h.rect.x = col + 210
         self._grid_h.draw(self.screen)
 
-        # Robot range
-        y = 95
-        _label(self.screen, self._fs, "Robots  min:", col, y + 7)
+        _lbl("Robots  min:", col, 115 + 7)
         self._rob_min.draw(self.screen)
-        _label(self.screen, self._fs, "max:", col + 185, y + 7)
+        _lbl("max:", col + 185, 115 + 7)
+        self._rob_max.rect.x = col + 220
         self._rob_max.draw(self.screen)
-        _label(self.screen, self._fs, "step:", col + 275, y + 7)
+        _lbl("step:", col + 300, 115 + 7)
+        self._rob_step.rect.x = col + 330
         self._rob_step.draw(self.screen)
 
-        # Scenarios per N
-        y = 130
-        _label(self.screen, self._fs, "Scenarios / N:", col, y + 7)
+        _lbl("Scenarios / N:", col, 150 + 7)
         self._scen_n.draw(self.screen)
 
-        # Obstacle density
-        y = 166
-        _label(self.screen, self._fs, "Obstacle density %:", col, y + 7)
+        _lbl("Obstacle density %:", col, 186 + 7, self._scen_mode)
         self._obs_pct.draw(self.screen)
 
-        # Timeout
-        y = 202
-        _label(self.screen, self._fs, "Timeout per run (s):", col, y + 7)
+        _lbl("Sim timeout per run (s):", col, 222 + 7)
         self._timeout.draw(self.screen)
-        _label(self.screen, self._fs, "0 = no limit", col + 240, y + 7)
+        _lbl("0 = no limit", col + 240, 222 + 7)
 
-        # Placement radio
+        _lbl("Plan timeout per run (s):", col, 258 + 7)
+        self._plan_timeout.draw(self.screen)
+        _lbl("0 = no limit", col + 240, 258 + 7)
+
+        plac_color = lbl_dim if self._scen_mode else COLORS["text_muted"]
         self.screen.blit(
-            self._fs.render("Placement strategy:", True, COLORS["text_muted"]),
-            (col, 250),
+            self._fs.render("Placement strategy:", True, plac_color),
+            (col, 286),
         )
         self._placement_radio.draw(self.screen)
 
-        # Reachability checkbox
+        reach_color = lbl_dim if self._scen_mode else COLORS["text_muted"]
         self._reach_box_rect = _checkbox(
             self.screen,
-            (col, 300, 300, 24),
+            (col, 336, 300, 24),
             self._check_reach,
             self._fs,
             "Check goal reachability (BFS)",
         )
+        if self._scen_mode:
+            dim_surf = pygame.Surface((300, 24), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 100))
+            self.screen.blit(dim_surf, (col, 336))
 
-        # Import section
+        src_y = 366
         self._import_btn.draw(self.screen)
+        self._scen_btn.draw(self.screen)
+
+        y_info = src_y + 38
+
         if self._imported:
-            y_imp = 370
-            n_shown = min(4, len(self._imported))
+            self._clear_imported_btn.rect = pygame.Rect(col + 440, src_y, 60, 32)
+            self._clear_imported_btn.draw(self.screen)
+            n_shown = min(3, len(self._imported))
             for i in range(n_shown):
                 name = os.path.basename(self._imported[i])
                 self.screen.blit(
                     self._fs.render(f"  • {name}", True, COLORS["text_muted"]),
-                    (col + 10, y_imp),
+                    (col + 10, y_info),
                 )
-                y_imp += 16
+                y_info += 15
             if len(self._imported) > n_shown:
                 self.screen.blit(
                     self._fs.render(
                         f"  … and {len(self._imported) - n_shown} more",
                         True, COLORS["text_muted"],
                     ),
-                    (col + 10, y_imp),
+                    (col + 10, y_info),
                 )
+                y_info += 15
 
-        # Summary
+        if self._scen_files:
+            self._clear_scen_btn.rect = pygame.Rect(col + 440, src_y, 60, 32)
+            self._clear_scen_btn.draw(self.screen)
+            n_shown = min(3, len(self._scen_files))
+            for i in range(n_shown):
+                name = os.path.basename(self._scen_files[i])
+                self.screen.blit(
+                    self._fs.render(f"  • {name}", True, COLORS["accent"]),
+                    (col + 10, y_info),
+                )
+                y_info += 15
+            if len(self._scen_files) > n_shown:
+                self.screen.blit(
+                    self._fs.render(
+                        f"  … and {len(self._scen_files) - n_shown} more",
+                        True, COLORS["accent"],
+                    ),
+                    (col + 10, y_info),
+                )
+                y_info += 15
+            self.screen.blit(
+                self._fs.render(
+                    "  Grid size / obstacles taken from .scen file",
+                    True, (120, 180, 120),
+                ),
+                (col + 10, y_info),
+            )
+
         cfg = self.build_config()
         nc = len(cfg.mapf_algos) * len(cfg.mrta_algos)
         nr = len(list(range(cfg.robot_min, cfg.robot_max + 1, cfg.robot_step)))
@@ -377,7 +474,8 @@ class BatchMapScreen:
             f"{cfg.scenarios_per_n} seeds = {total}",
             True, COLORS["text"],
         )
-        self.screen.blit(summary, summary.get_rect(centerx=W // 2, y=H - 80))
+        W2, H2 = self.screen.get_size()
+        self.screen.blit(summary, summary.get_rect(centerx=W2 // 2, y=H2 - 80))
 
         self._run_btn.draw(self.screen)
         self._back_btn.draw(self.screen)
@@ -399,13 +497,11 @@ class BatchProgressScreen:
         self._fb = pygame.font.SysFont("Arial", 14)
         self._fs = pygame.font.SysFont("Arial", 12)
 
-        W, H = BATCH_W, BATCH_H
-        self._menu_btn = Button((W // 2 - 90, H - 60, 180, 42),
-                                "Back to Menu", self._fb)
-        self._open_btn = Button((W // 2 + 100, H - 60, 160, 42),
-                                "Open Folder", self._fs)
+        dummy = pygame.Rect(0, 0, 1, 1)
+        self._menu_btn = Button(dummy, "Back to Menu", self._fb)
+        self._open_btn = Button(dummy, "Open Folder", self._fs)
+        self.reflow()
 
-        # State
         self._fraction: float = 0.0
         self._current_label: str = "Initializing…"
         self._done: bool = False
@@ -414,6 +510,11 @@ class BatchProgressScreen:
         self._lock = threading.Lock()
 
         self._start_runner()
+
+    def reflow(self):
+        W, H = self.screen.get_size()
+        self._menu_btn.rect = pygame.Rect(W // 2 - 90,  H - 60, 180, 42)
+        self._open_btn.rect = pygame.Rect(W // 2 + 100, H - 60, 160, 42)
 
     def _start_runner(self):
         def _target():
@@ -467,7 +568,7 @@ class BatchProgressScreen:
             pass
 
     def draw(self):
-        W, H = BATCH_W, BATCH_H
+        W, H = self.screen.get_size()
         self.screen.fill(COLORS["bg"])
         draw_panel(self.screen, (10, 10, W - 20, H - 76), alpha=200)
 

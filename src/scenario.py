@@ -10,6 +10,7 @@ depends on the algorithm type chosen later.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 
@@ -62,3 +63,100 @@ def save_scenario(scene: SceneData, path: str) -> None:
 def load_scenario(path: str) -> SceneData:
     with open(path) as f:
         return SceneData.from_dict(json.load(f))
+
+
+_PASSABLE = frozenset([".", "G", "S"])
+
+
+def load_moving_ai_map(path: str) -> SceneData:
+    with open(path) as f:
+        lines = f.readlines()
+
+    width = height = 0
+    map_start = 0
+    for i, line in enumerate(lines):
+        low = line.strip().lower()
+        if low.startswith("width"):
+            width = int(low.split()[1])
+        elif low.startswith("height"):
+            height = int(low.split()[1])
+        elif low == "map":
+            map_start = i + 1
+            break
+
+    obstacles: list[tuple[int, int]] = []
+    for row, line in enumerate(lines[map_start:map_start + height]):
+        for col, ch in enumerate(line.rstrip("\n")):
+            if ch not in _PASSABLE:
+                obstacles.append((col, row))
+
+    return SceneData(
+        grid_width=width,
+        grid_height=height,
+        obstacles=obstacles,
+        agent_starts=[],
+        goals=[],
+    )
+
+
+def load_moving_ai_scen(path: str) -> SceneData:
+    agent_starts: list[tuple[int, int]] = []
+    goals: list[tuple[int, int]] = []
+    map_ref: str | None = None
+    map_width = map_height = 0
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.lower().startswith("version"):
+                continue
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            if map_ref is None:
+                map_ref = parts[1]
+            try:
+                map_width = max(map_width, int(parts[2]))
+                map_height = max(map_height, int(parts[3]))
+                sx, sy = int(parts[4]), int(parts[5])
+                gx, gy = int(parts[6]), int(parts[7])
+            except ValueError:
+                continue
+            agent_starts.append((sx, sy))
+            goals.append((gx, gy))
+
+    obstacles: list[tuple[int, int]] = []
+    actual_w, actual_h = map_width, map_height
+
+    if map_ref is not None:
+        scen_dir = os.path.dirname(os.path.abspath(path))
+        candidates = [
+            os.path.join(scen_dir, map_ref),
+            os.path.join(scen_dir, os.path.basename(map_ref)),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                try:
+                    map_scene = load_moving_ai_map(candidate)
+                    obstacles = map_scene.obstacles
+                    actual_w = map_scene.grid_width
+                    actual_h = map_scene.grid_height
+                except Exception:
+                    pass
+                break
+
+    return SceneData(
+        grid_width=actual_w,
+        grid_height=actual_h,
+        obstacles=obstacles,
+        agent_starts=agent_starts,
+        goals=goals,
+    )
+
+
+def load_map_file(path: str) -> SceneData:
+    if path.endswith(".map"):
+        return load_moving_ai_map(path)
+    if path.endswith(".scen"):
+        return load_moving_ai_scen(path)
+    return load_scenario(path)

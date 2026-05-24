@@ -31,6 +31,7 @@ from collections import defaultdict
 def _build_intervals(
     reserved: set,
     max_time: int,
+    permanent_after: dict | None = None,
 ) -> dict[tuple[int, int], list[tuple[int, int]]]:
     """Build safe-interval lists for every cell that appears in *reserved*.
 
@@ -39,6 +40,13 @@ def _build_intervals(
 
     Cells that never appear in *reserved* implicitly have a single interval
     ``(0, max_time)`` — handled lazily in ``_intervals_for``.
+
+    Parameters
+    ----------
+    permanent_after : dict | None
+        ``(x, y) → t_start``: cell is permanently occupied for all
+        ``t >= t_start``.  Safe intervals for such cells are truncated to
+        end at ``t_start - 1``.
     """
     # Collect every blocked timestep per cell
     blocked: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -62,6 +70,21 @@ def _build_intervals(
             ivs.append((start, max_time))
         intervals[cell] = ivs
 
+    # Apply permanent_after: truncate intervals that extend past t_start
+    if permanent_after:
+        for cell, t_start in permanent_after.items():
+            cap = t_start - 1
+            if cap < 0:
+                intervals[cell] = []
+                continue
+            existing = intervals.get(cell, [(0, max_time)])
+            truncated = [
+                (a, min(b, cap))
+                for a, b in existing
+                if a <= cap
+            ]
+            intervals[cell] = truncated
+
     return intervals
 
 
@@ -82,11 +105,18 @@ def _interval_index(intervals: list[tuple[int, int]], t: int) -> int:
     return -1
 
 
-def sipp(world, start, goal, reserved: set | None = None, max_time: int | None = None):
+def sipp(world, start, goal, reserved: set | None = None, max_time: int | None = None,
+         permanent_after: dict | None = None):
     """SIPP path planner — drop-in replacement for ``astar_time``.
 
     Returns a path as a list of ``((x, y), t)`` tuples (same format as
     ``astar_time``), or ``None`` if no path exists within *max_time*.
+
+    Parameters
+    ----------
+    permanent_after : dict | None
+        ``(x, y) → t_start``: cell permanently occupied from ``t_start``
+        onward.  Safe intervals for such cells are truncated accordingly.
     """
     if reserved is None:
         reserved = set()
@@ -105,7 +135,7 @@ def sipp(world, start, goal, reserved: set | None = None, max_time: int | None =
         return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
 
     # Precompute safe intervals for all reserved cells
-    safe_intervals = _build_intervals(reserved, max_time)
+    safe_intervals = _build_intervals(reserved, max_time, permanent_after)
 
     last_goal_reserved = max(
         (t for (x, y, t) in reserved if (x, y) == goal),

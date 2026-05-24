@@ -5,15 +5,18 @@ Supports four placement strategies:
   clustered — agents clustered near centre; goals near the perimeter
   counter   — agents on the left half, goals on the right half (opposing flows)
   min_dist  — guarantees a minimum Chebyshev distance between any two starts
+
+Also supports loading pairs directly from MovingAI .scen files via ScenLibrary.
 """
 
 from __future__ import annotations
 
+import os
 import random
 from collections import deque
 
 from batch.config import BatchConfig
-from scenario import SceneData, load_scenario
+from scenario import SceneData, load_map_file, load_moving_ai_scen
 
 
 _MAX_RETRIES = 20   # retries for reachability failures
@@ -37,8 +40,6 @@ def _free_cells(grid_w: int, grid_h: int,
         if (x, y) not in obstacles and (x, y) not in exclude
     ]
 
-
-# ── Placement strategies ──────────────────────────────────────────────────────
 
 def _place_uniform(grid_w: int, grid_h: int, obstacles: set,
                    n_agents: int, rng: random.Random
@@ -72,7 +73,6 @@ def _place_clustered(grid_w: int, grid_h: int, obstacles: set,
         and (abs(x - cx) > r_outer or abs(y - cy) > r_outer)
     ]
     if len(inner) < n_agents or len(outer) < n_agents:
-        # Fall back to uniform
         return _place_uniform(grid_w, grid_h, obstacles, n_agents, rng)
 
     starts = rng.sample(inner, n_agents)
@@ -129,8 +129,6 @@ def _place_min_dist(grid_w: int, grid_h: int, obstacles: set,
     return starts, goals
 
 
-# ── Reachability ──────────────────────────────────────────────────────────────
-
 def _bfs_reachable(grid_w: int, grid_h: int, obstacles: set,
                    start: tuple, goal: tuple) -> bool:
     if start == goal:
@@ -159,8 +157,6 @@ def _all_reachable(grid_w: int, grid_h: int, obstacles: set,
     return True
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 _PLACEMENT_FNS = {
     "uniform":   _place_uniform,
     "clustered": _place_clustered,
@@ -169,18 +165,166 @@ _PLACEMENT_FNS = {
 }
 
 
+class ScenLibrary:
+    """Cached representation of one MovingAI .scen file.
+
+    Holds all (start, goal) pairs and the map's obstacle list so that
+    :meth:`sample` can produce a fresh SceneData without re-reading the file.
+
+    Parameters
+    ----------
+    scen_path : str
+        Absolute or relative path to the ``.scen`` file.  The associated
+        ``.map`` file is expected to be in the same directory (the standard
+        MovingAI layout).
+    """
+
+    def __init__(self, scen_path: str) -> None:
+        self._path = scen_path
+        scene = load_moving_ai_scen(scen_path)
+        self._grid_w = scene.grid_width
+        self._grid_h = scene.grid_height
+        self._obstacles = scene.obstacles  # list of (x, y)
+        self._pairs: list[tuple[tuple, tuple]] = list(
+            zip(scene.agent_starts, scene.goals)
+        )
+
+
+    @property
+    def basename(self) -> str:
+        return os.path.basename(self._path)
+
+    @property
+    def n_pairs(self) -> int:
+        return len(self._pairs)
+
+    def sample(self, n_robots: int, seed: int) -> SceneData | None:
+        """Return a SceneData with *n_robots* agents sampled from this library.
+
+        Algorithm
+        ---------
+        1. Copy the full pair list.
+        2. Shuffle with ``random.Random(seed)``.
+        3. Walk the shuffled list; accept a pair only if its ``start``
+           has not been used yet (deduplication of start positions).
+        4. Stop when *n_robots* pairs are collected, or return ``None``
+           if the library does not have enough distinct starts.
+        """
+        if n_robots <= 0:
+            return None
+
+        rng = random.Random(seed)
+        pool = list(self._pairs)
+        rng.shuffle(pool)
+
+        starts: list[tuple] = []
+        goals: list[tuple] = []
+        used_starts: set[tuple] = set()
+
+        for start, goal in pool:
+            if start in used_starts:
+                continue
+            used_starts.add(start)
+            starts.append(start)
+            goals.append(goal)
+            if len(starts) == n_robots:
+                break
+
+        if len(starts) < n_robots:
+            return None
+
+        return SceneData(
+            grid_width=self._grid_w,
+            grid_height=self._grid_h,
+            obstacles=list(self._obstacles),
+            agent_starts=starts,
+            goals=goals,
+        )
+
+
 class SceneGenerator:
+    def __init__(self) -> None:
+        self._scen_cache: dict[str, ScenLibrary] = {}
+
+
     def generate(self, config: BatchConfig,
                  n_robots: int, seed: int) -> SceneData | None:
         """Generate (or load) one scenario for *n_robots* agents.
 
+        Priority:
+          1. ``.scen`` files  (if ``config.scen_files`` is non-empty)
+          2. Imported ``.map`` / ``.json`` files
+          3. Random generation
+
         Returns ``None`` if generation failed after all retries.
         """
+        if config.scen_files:
+            return self._from_scen(config, n_robots, seed)
         if config.imported_maps:
             return self._from_imported(config, n_robots, seed)
         return self._generate_random(config, n_robots, seed)
 
-    # ── Random generation ────────────────────────────────────────────
+    def _get_or_load(self, path: str) -> ScenLibrary:
+        if path not in self._scen_cache:
+            self._scen_cache[path] = ScenLibrary(path)
+        return self._scen_cache[path]
+
+    def _from_scen(self, config: BatchConfig,
+                   n_robots: int, seed: int) -> SceneData | None:
+        """Pick a .scen file (round-robin by seed) and sample n_robots pairs."""
+        rng = random.Random(seed)
+        path = rng.choice(config.scen_files)
+        try:
+            lib = self._get_or_load(path)
+        except Exception:
+            return None
+        return lib.sample(n_robots, seed)
+
+    def _from_imported(self, config: BatchConfig,
+                       n_robots: int, seed: int) -> SceneData | None:
+        rng = random.Random(seed)
+        map_path = rng.choice(config.imported_maps)
+        try:
+            scene = load_map_file(map_path)
+        except Exception:
+            return None
+
+        obstacles = set(map(tuple, scene.obstacles))
+
+        if len(scene.agent_starts) >= n_robots:
+            pairs = list(zip(scene.agent_starts, scene.goals))
+            selected = rng.sample(pairs, n_robots)
+            return SceneData(
+                grid_width=scene.grid_width,
+                grid_height=scene.grid_height,
+                obstacles=scene.obstacles,
+                agent_starts=[s for s, g in selected],
+                goals=[g for s, g in selected],
+            )
+
+        place_fn = _PLACEMENT_FNS.get(config.placement, _place_uniform)
+        for attempt in range(_MAX_RETRIES):
+            r = place_fn(
+                scene.grid_width, scene.grid_height,
+                obstacles, n_robots,
+                random.Random(seed + attempt * 1000),
+            )
+            if r is None:
+                continue
+            starts, goals = r
+            if config.check_reachability:
+                if not _all_reachable(
+                        scene.grid_width, scene.grid_height, obstacles,
+                        starts, goals):
+                    continue
+            return SceneData(
+                grid_width=scene.grid_width,
+                grid_height=scene.grid_height,
+                obstacles=scene.obstacles,
+                agent_starts=list(starts),
+                goals=list(goals),
+            )
+        return None
 
     def _generate_random(self, config: BatchConfig,
                          n_robots: int, seed: int) -> SceneData | None:
@@ -211,46 +355,6 @@ class SceneGenerator:
                 grid_width=config.grid_w,
                 grid_height=config.grid_h,
                 obstacles=obstacles_list,
-                agent_starts=list(starts),
-                goals=list(goals),
-            )
-        return None
-
-    # ── Imported maps ────────────────────────────────────────────────
-
-    def _from_imported(self, config: BatchConfig,
-                       n_robots: int, seed: int) -> SceneData | None:
-        rng = random.Random(seed)
-        map_path = rng.choice(config.imported_maps)
-        try:
-            scene = load_scenario(map_path)
-        except Exception:
-            return None
-
-        obstacles = set(map(tuple, scene.obstacles))
-        n = min(n_robots, len(scene.agent_starts), len(scene.goals))
-        if n < n_robots:
-            return None
-
-        place_fn = _PLACEMENT_FNS.get(config.placement, _place_uniform)
-        for attempt in range(_MAX_RETRIES):
-            r = place_fn(
-                scene.grid_width, scene.grid_height,
-                obstacles, n_robots,
-                random.Random(seed + attempt * 1000),
-            )
-            if r is None:
-                continue
-            starts, goals = r
-            if config.check_reachability:
-                if not _all_reachable(
-                        scene.grid_width, scene.grid_height, obstacles,
-                        starts, goals):
-                    continue
-            return SceneData(
-                grid_width=scene.grid_width,
-                grid_height=scene.grid_height,
-                obstacles=scene.obstacles,
                 agent_starts=list(starts),
                 goals=list(goals),
             )

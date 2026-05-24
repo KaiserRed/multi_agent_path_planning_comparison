@@ -9,132 +9,35 @@ Multi-Agent Pathfinding Problem."  SoCS 2014.
 
 ECBS is a bounded-suboptimal variant of CBS.  At both levels of the
 search (constraint tree and low-level pathfinding) a *focal search* is
-used: among all nodes whose f-value is within ``w * f_min``, the one
-with the fewest conflicts is expanded first.  This trades optimality
-for a large speed-up.
+used: among all nodes whose lower-bound cost is within ``w * LB_min``,
+the one with the fewest conflicts is expanded first.  This trades
+optimality for a large speed-up while maintaining a ``w``-suboptimality
+guarantee.
 """
 
 from __future__ import annotations
 
 from heapq import heappush, heappop
 
-from mapf.a_star import astar_time, heuristic as manhattan
+from mapf.a_star import astar_time
+from mapf.focal_a_star import focal_astar
 from mapf.planner import MAPFPlanner
 
 
-#  Low-level: focal A* 
+# Conflict detection
 
-def _focal_astar(world, start, goal, reserved, other_paths, w,
-                 start_time=0, max_time=None):
-    """
-    Bounded-suboptimal A* using focal search.
+class _Conflict:
+    __slots__ = ("agent1", "agent2", "time", "pos", "kind", "prev1", "prev2")
 
-    Among all reachable paths with cost ≤ ``w * optimal``, returns the
-    one whose trajectory has the fewest *soft* conflicts with the
-    current paths of other agents (given by *other_paths*).
-    """
-    if max_time is None:
-        max_time = start_time + world.width * world.height * 2
+    def __init__(self, agent1, agent2, t, pos, kind="vertex", prev1=None, prev2=None):
+        self.agent1 = agent1
+        self.agent2 = agent2
+        self.time = t
+        self.pos = pos
+        self.kind = kind    # "vertex" | "swap"
+        self.prev1 = prev1  # position of agent1 at t-1 (swap only)
+        self.prev2 = prev2  # position of agent2 at t-1 (swap only)
 
-    if not world.is_free(goal[0], goal[1]):
-        return None
-
-    other_occ: set = set()
-    path_end = max((len(p) for p in other_paths.values() if p), default=0) + 20
-    for path in other_paths.values():
-        if path:
-            for pos, t in path:
-                other_occ.add((pos[0], pos[1], t))
-            last = path[-1][0]
-            for t2 in range(len(path), min(path_end, max_time + 1)):
-                other_occ.add((last[0], last[1], t2))
-
-    def h(pos):
-        return manhattan(pos, goal)
-
-    g_score: dict = {}
-    conf: dict = {}
-    came_from: dict = {}
-    closed: set = set()
-
-    init = (start, start_time)
-    g_score[init] = 0
-    conf[init] = 0
-
-    counter = 0
-    f_heap: list = []
-    heappush(f_heap, (h(start), counter, init))
-    open_states: set = {init}
-
-    while open_states:
-        while f_heap and f_heap[0][2] not in open_states:
-            heappop(f_heap)
-        if not f_heap:
-            break
-
-        f_min = f_heap[0][0]
-        threshold = w * f_min
-
-        best = None
-        best_conf = float("inf")
-        best_f = float("inf")
-
-        for state in open_states:
-            f_val = g_score[state] + h(state[0])
-            if f_val <= threshold + 1e-9:
-                c = conf[state]
-                if c < best_conf or (c == best_conf and f_val < best_f):
-                    best_conf = c
-                    best_f = f_val
-                    best = state
-
-        if best is None:
-            break
-
-        state = best
-        open_states.discard(state)
-        closed.add(state)
-
-        pos, t = state
-        if pos == goal:
-            path: list = []
-            s = state
-            while s in came_from:
-                path.append(s)
-                s = came_from[s]
-            path.append(init)
-            path.reverse()
-            return path
-
-        x, y = pos
-        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            nt = t + 1
-            if nt > max_time:
-                continue
-            if not world.is_free(nx, ny):
-                continue
-            if (nx, ny, nt) in reserved:
-                continue
-
-            nstate = ((nx, ny), nt)
-            if nstate in closed:
-                continue
-
-            new_g = g_score[state] + 1
-            if new_g < g_score.get(nstate, float("inf")):
-                g_score[nstate] = new_g
-                came_from[nstate] = state
-                new_c = conf[state] + (1 if (nx, ny, nt) in other_occ else 0)
-                conf[nstate] = new_c
-                counter += 1
-                heappush(f_heap, (new_g + h((nx, ny)), counter, nstate))
-                open_states.add(nstate)
-
-    return None
-
-
-# Conflict helpers 
 
 def _pos_at(path, t):
     if not path:
@@ -143,6 +46,7 @@ def _pos_at(path, t):
 
 
 def _detect_first_conflict(paths):
+    """Return first vertex or swap conflict, or None."""
     if not paths:
         return None
     ids = list(paths.keys())
@@ -155,7 +59,7 @@ def _detect_first_conflict(paths):
                 continue
             pos = _pos_at(p, t)
             if pos in positions:
-                return (positions[pos], aid, t, pos)
+                return _Conflict(positions[pos], aid, t, pos, kind="vertex")
             positions[pos] = aid
         if t > 0:
             for i in range(len(ids)):
@@ -163,13 +67,47 @@ def _detect_first_conflict(paths):
                     p1, p2 = paths[ids[i]], paths[ids[j]]
                     if not p1 or not p2:
                         continue
-                    if (_pos_at(p1, t) == _pos_at(p2, t - 1) and
-                            _pos_at(p2, t) == _pos_at(p1, t - 1)):
-                        return (ids[i], ids[j], t, _pos_at(p1, t))
+                    pos1_t = _pos_at(p1, t)
+                    pos2_t = _pos_at(p2, t)
+                    pos1_prev = _pos_at(p1, t - 1)
+                    pos2_prev = _pos_at(p2, t - 1)
+                    if pos1_t == pos2_prev and pos2_t == pos1_prev:
+                        return _Conflict(
+                            ids[i], ids[j], t, pos1_t,
+                            kind="swap",
+                            prev1=pos1_prev,
+                            prev2=pos2_prev,
+                        )
     return None
 
 
+def _count_conflicts_with(paths, agent_id):
+    """Count conflicts where *agent_id* is one of the two parties."""
+    if not paths or agent_id not in paths:
+        return 0
+    target = paths[agent_id]
+    if not target:
+        return 0
+    count = 0
+    max_t = max((len(p) for p in paths.values() if p), default=0)
+    for other_id, other in paths.items():
+        if other_id == agent_id or not other:
+            continue
+        for t in range(max_t):
+            tp = _pos_at(target, t)
+            op = _pos_at(other, t)
+            if tp == op:
+                count += 1
+            if t > 0:
+                tp_prev = _pos_at(target, t - 1)
+                op_prev = _pos_at(other, t - 1)
+                if tp == op_prev and op == tp_prev:
+                    count += 1
+    return count
+
+
 def _count_conflicts(paths):
+    """Full O(T·N²) conflict count — used only for the root node."""
     if not paths:
         return 0
     ids = list(paths.keys())
@@ -198,15 +136,42 @@ def _count_conflicts(paths):
     return count
 
 
-# High-level ECBS
 class _CTNode:
-    __slots__ = ("paths", "cost", "conflicts")
+    """
+    Constraint-tree node.
 
-    def __init__(self, paths):
+    Attributes
+    ----------
+    paths : dict[agent_id → path]
+    cost : int
+        Sum of path lengths (actual cost).
+    per_agent_lb : dict[agent_id → int]
+        Per-agent lower bounds (path length from unconstrained optimal).
+    lb : int
+        Sum of per-agent lower bounds.  Used as the focal threshold key
+        (``w * lb_min``) to maintain the w-suboptimality guarantee.
+    conflicts : int
+        Number of pairwise conflicts — focal tie-breaker.
+    constraints : dict[agent_id → {'vertex': set, 'edge': set}]
+        All constraints accumulated from root to this node.
+    """
+    __slots__ = ("paths", "cost", "per_agent_lb", "lb", "conflicts", "constraints")
+
+    def __init__(self, paths, per_agent_lb=None, conflicts=None, constraints=None):
         self.paths = paths
         self.cost = sum(len(p) for p in paths.values() if p)
-        self.conflicts = _count_conflicts(paths)
+        if per_agent_lb is None:
+            # Root node: unconstrained paths are optimal → lb = cost
+            self.per_agent_lb = {aid: len(p) for aid, p in paths.items() if p}
+            self.lb = self.cost
+        else:
+            self.per_agent_lb = per_agent_lb
+            self.lb = sum(per_agent_lb.values())
+        self.conflicts = _count_conflicts(paths) if conflicts is None else conflicts
+        self.constraints = constraints if constraints is not None else {}
 
+
+# High-level ECBS
 
 def ecbs(world, agents, w=1.3):
     """Enhanced CBS with suboptimality bound *w*."""
@@ -226,58 +191,139 @@ def ecbs(world, agents, w=1.3):
                 world.width + world.height + 10)
 
     root = _CTNode(init_paths)
-    open_nodes: list[_CTNode] = [root]
+
+    # Two-heap open/focal with lazy deletion
+    ctr = 0
+    open_heap: list = []   # (lb, ctr, node)
+    focal_heap: list = []  # (conflicts, cost, ctr, node)
+    expanded: set = set()  # counters of expanded nodes
+
+    heappush(open_heap, (root.lb, ctr, root))
+    heappush(focal_heap, (root.conflicts, root.cost, ctr, root))
+    last_lb_min = root.lb
+    ctr = 1
 
     iterations = 0
     max_iter = 50_000
 
-    while open_nodes and iterations < max_iter:
+    while open_heap and iterations < max_iter:
         iterations += 1
 
-        cost_min = min(n.cost for n in open_nodes)
-        focal_bound = w * cost_min
+        # Current lb_min
+        while open_heap and open_heap[0][1] in expanded:
+            heappop(open_heap)
+        if not open_heap:
+            break
+        lb_min = open_heap[0][0]
+        focal_bound = w * lb_min
 
-        focal = [n for n in open_nodes if n.cost <= focal_bound + 1e-9]
-        node = min(focal, key=lambda n: (n.conflicts, n.cost))
-        open_nodes.remove(node)
+        # When lb_min increased, scan open_heap for newly eligible nodes
+        if lb_min > last_lb_min + 1e-9:
+            for lb_val, nc, n in open_heap:
+                if nc not in expanded and n.lb <= focal_bound + 1e-9:
+                    heappush(focal_heap, (n.conflicts, n.cost, nc, n))
+            last_lb_min = lb_min
+
+        # Pop best from focal_heap (lazy-delete expanded)
+        node = None
+        node_ctr = -1
+        while focal_heap:
+            _c, _cost, nc, n = focal_heap[0]
+            heappop(focal_heap)
+            if nc in expanded:
+                continue
+            node = n
+            node_ctr = nc
+            break
+
+        if node is None:
+            break
+        expanded.add(node_ctr)
 
         conflict = _detect_first_conflict(node.paths)
         if conflict is None:
             return node.paths
 
-        agent1, agent2, _ct, _cpos = conflict
+        for agent_id in [conflict.agent1, conflict.agent2]:
+            # --- Accumulate constraints (deep-copy parent + add new) ----------
+            new_constraints = {
+                aid: {'vertex': set(c['vertex']), 'edge': set(c['edge'])}
+                for aid, c in node.constraints.items()
+            }
+            agent_cons = new_constraints.setdefault(
+                agent_id, {'vertex': set(), 'edge': set()}
+            )
+            if conflict.kind == "swap":
+                if agent_id == conflict.agent1:
+                    agent_cons['edge'].add((conflict.prev1, conflict.pos, conflict.time))
+                else:
+                    agent_cons['edge'].add((conflict.prev2, conflict.prev1, conflict.time))
+            else:  # vertex conflict
+                agent_cons['vertex'].add(
+                    (conflict.pos[0], conflict.pos[1], conflict.time)
+                )
 
-        for agent_id in [agent1, agent2]:
             reserved: set = set()
+            permanent_after: dict = {}
             other_paths: dict = {}
 
             for other_id, path in node.paths.items():
                 if other_id == agent_id:
                     continue
                 other_paths[other_id] = path
-                for idx, (pos, t) in enumerate(path):
+                for pos, t in path:
                     reserved.add((pos[0], pos[1], t))
-                    if idx > 0:
-                        prev_pos = path[idx - 1][0]
-                        reserved.add((prev_pos[0], prev_pos[1], t))
                 if path:
                     gx, gy = path[-1][0]
-                    for extra_t in range(len(path), max_t + 1):
-                        reserved.add((gx, gy, extra_t))
+                    st = len(path)
+                    curr = permanent_after.get((gx, gy))
+                    if curr is None or st < curr:
+                        permanent_after[(gx, gy)] = st
+
+            # Apply every accumulated constraint for this agent
+            reserved.update(agent_cons['vertex'])
+            edge_reserved = set(agent_cons['edge'])
 
             agent = next(a for a in agents if a.id == agent_id)
-            new_path = _focal_astar(
-                world,
-                (agent.x, agent.y),
-                (agent.goal_x, agent.goal_y),
-                reserved, other_paths, w,
-                max_time=max_t,
-            )
+            start = (agent.x, agent.y)
+            goal = (agent.goal_x, agent.goal_y)
+
+            # Dynamic max_t: retry with doubling horizon if A* fails
+            new_path = None
+            for mult in (1, 2, 4, 8):
+                new_path = focal_astar(
+                    world, start, goal,
+                    reserved, other_paths, w,
+                    edge_reserved=edge_reserved if edge_reserved else None,
+                    permanent_after=permanent_after if permanent_after else None,
+                    max_time=max_t * mult,
+                )
+                if new_path is not None:
+                    break
 
             if new_path:
-                new_paths = dict(node.paths)
+                new_paths = {k: list(v) for k, v in node.paths.items()}
                 new_paths[agent_id] = new_path
-                open_nodes.append(_CTNode(new_paths))
+
+                # Incremental LB: only update the replanned agent
+                new_per_agent_lb = dict(node.per_agent_lb)
+                old_lb_i = node.per_agent_lb.get(agent_id, 0)
+                new_per_agent_lb[agent_id] = max(old_lb_i, len(new_path))
+
+                # Incremental conflicts: recount only for replanned agent
+                old_conf_i = _count_conflicts_with(node.paths, agent_id)
+                new_conf_i = _count_conflicts_with(new_paths, agent_id)
+                new_conflicts = node.conflicts - old_conf_i + new_conf_i
+
+                child = _CTNode(new_paths,
+                                per_agent_lb=new_per_agent_lb,
+                                conflicts=new_conflicts,
+                                constraints=new_constraints)
+                child_ctr = ctr
+                ctr += 1
+                heappush(open_heap, (child.lb, child_ctr, child))
+                if child.lb <= focal_bound + 1e-9:
+                    heappush(focal_heap, (child.conflicts, child.cost, child_ctr, child))
 
     return None
 
