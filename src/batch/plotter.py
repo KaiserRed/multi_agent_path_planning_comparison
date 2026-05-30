@@ -12,19 +12,20 @@ import pandas as pd
 
 
 _PLOT_STYLE = {
-    "figure.facecolor": "#0d1124",
-    "axes.facecolor": "#16204a",
-    "axes.edgecolor": "#37497c",
-    "axes.labelcolor": "#e1e8ff",
-    "xtick.color": "#8294c3",
-    "ytick.color": "#8294c3",
-    "text.color": "#e1e8ff",
-    "grid.color": "#2b3a68",
-    "grid.linestyle": "--",
-    "grid.alpha": 0.5,
-    "lines.linewidth": 2.0,
-    "legend.facecolor": "#16204a",
-    "legend.edgecolor": "#37497c",
+    "figure.facecolor": "#ffffff",
+    "axes.facecolor":   "#f5f7fc",
+    "axes.edgecolor":   "#b0b8cc",
+    "axes.labelcolor":  "#1a1e32",
+    "xtick.color":      "#4a5068",
+    "ytick.color":      "#4a5068",
+    "text.color":       "#1a1e32",
+    "grid.color":       "#d0d6e8",
+    "grid.linestyle":   "--",
+    "grid.alpha":       0.7,
+    "lines.linewidth":  2.0,
+    "legend.facecolor": "#ffffff",
+    "legend.edgecolor": "#b0b8cc",
+    "legend.framealpha": 0.95,
 }
 
 _MRTA_MARKERS: dict[str, str] = {
@@ -37,18 +38,18 @@ _MRTA_MARKERS: dict[str, str] = {
 _MARKER_DEFAULT = "P" 
 
 _MAPF_COLORS: dict[str, str] = {
-    "CBS (A*)":   "#4e91f7",  # синий
-    "CBS (SIPP)": "#f76e4e",  # оранжевый
-    "ECBS":       "#4ef7a0",  # зелёный
-    "EECBS":      "#f7e04e",  # жёлтый
-    "M*":         "#c24ef7",  # фиолетовый
-    "CA*":        "#f74e4e",  # красный
-    "WHCA*":      "#4ef7f0",  # голубой
-    "PIBT":       "#f74ec2",  # розовый
+    "CBS (A*)":   "#1a6fcc",  # синий
+    "CBS (SIPP)": "#d95f02",  # оранжевый
+    "ECBS":       "#1b9e4a",  # зелёный
+    "EECBS":      "#b8860b",  # тёмно-жёлтый
+    "M*":         "#7b2d8b",  # фиолетовый
+    "CA*":        "#cc2222",  # красный
+    "WHCA*":      "#0891b2",  # голубой
+    "PIBT":       "#c2185b",  # розовый
 }
 _COLOR_FALLBACK = [
-    "#7cf74e", "#4e6df7", "#f7a04e", "#a04ef7",
-    "#4ef7d4", "#f7d44e", "#4ef76e", "#f74e8f",
+    "#2e7d32", "#1565c0", "#e65100", "#6a1b9a",
+    "#00695c", "#f9a825", "#4e342e", "#880e4f",
 ]
 
 
@@ -102,8 +103,14 @@ def _plot_metric(
     ax.set_title(title)
     ax.grid(True)
     if combos:
-        ax.legend(fontsize=8, loc="best",
-                  ncol=max(1, len(combos) // 10))
+        n_cols = max(1, min(len(combos), 3))
+        ax.legend(
+            fontsize=8,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.18),
+            ncol=n_cols,
+            borderaxespad=0,
+        )
 
 
 def save_results(df: pd.DataFrame, output_dir: str) -> str:
@@ -150,6 +157,12 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
     )
 
     with plt.style.context(_PLOT_STYLE):
+        def _save(fig, name: str):
+            fig.tight_layout()
+            fig.subplots_adjust(bottom=0.30)
+            fig.savefig(os.path.join(out, name), dpi=150, bbox_inches="tight")
+            plt.close(fig)
+
         # 1. Makespan vs robots
         fig, ax = plt.subplots(figsize=(10, 6))
         _plot_metric(
@@ -160,9 +173,7 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
             "Makespan (steps)",
             "Makespan vs Number of Robots",
         )
-        fig.tight_layout()
-        fig.savefig(os.path.join(out, "makespan_vs_robots.png"), dpi=150)
-        plt.close(fig)
+        _save(fig, "makespan_vs_robots.png")
 
         # 2. SOC vs robots
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -174,9 +185,7 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
             "Sum of Costs",
             "Sum of Costs vs Number of Robots",
         )
-        fig.tight_layout()
-        fig.savefig(os.path.join(out, "soc_vs_robots.png"), dpi=150)
-        plt.close(fig)
+        _save(fig, "soc_vs_robots.png")
 
         # 3. Planning time vs robots
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -188,9 +197,7 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
             "Planning time (s)",
             "Planning Time vs Number of Robots",
         )
-        fig.tight_layout()
-        fig.savefig(os.path.join(out, "planning_time_vs_robots.png"), dpi=150)
-        plt.close(fig)
+        _save(fig, "planning_time_vs_robots.png")
 
         # 4. Success rate vs robots
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -203,8 +210,89 @@ def save_results(df: pd.DataFrame, output_dir: str) -> str:
             "Success Rate vs Number of Robots",
         )
         ax.set_ylim(0, 1.05)
-        fig.tight_layout()
-        fig.savefig(os.path.join(out, "success_rate_vs_robots.png"), dpi=150)
-        plt.close(fig)
+        _save(fig, "success_rate_vs_robots.png")
 
     return out
+
+
+def replot_csv(csv_path: str) -> str:
+    """Regenerate all 4 plots from an existing results CSV.
+
+    Saves the new PNGs into the same folder as the CSV.
+    Returns that folder path.
+    """
+    df = pd.read_csv(csv_path)
+    df["success"] = df["success"].astype(bool)
+
+    out = os.path.dirname(os.path.abspath(csv_path))
+
+    success_df = df[df["success"]].copy()
+    if success_df.empty:
+        success_df = df.copy()
+        success_df["makespan"] = 0
+        success_df["soc"] = 0
+
+    combos = list(df.groupby(["mrta_algo", "mapf_algo"]).groups.keys())
+
+    def _agg(source: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+        g = source.groupby(["mrta_algo", "mapf_algo", "n_robots"])
+        mean = g[cols].mean().reset_index()
+        std  = g[cols].std().reset_index()
+        for c in cols:
+            mean[c + "_std"] = std[c]
+        return mean
+
+    success_agg = _agg(success_df, ["makespan", "soc",
+                                     "plan_total_s", "plan_mrta_s",
+                                     "plan_mapf_s"])
+    sr_agg = (
+        df.groupby(["mrta_algo", "mapf_algo", "n_robots"])["success"]
+        .mean().reset_index().rename(columns={"success": "success_rate"})
+    )
+    sr_agg["success_rate_std"] = (
+        df.groupby(["mrta_algo", "mapf_algo", "n_robots"])["success"]
+        .std().reset_index()["success"]
+    )
+
+    def _save(fig, name: str):
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.30)
+        fig.savefig(os.path.join(out, name), dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    with plt.style.context(_PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        _plot_metric(ax, success_agg.groupby(["mrta_algo", "mapf_algo"]),
+                     combos, "makespan", "Makespan (steps)",
+                     "Makespan vs Number of Robots")
+        _save(fig, "makespan_vs_robots.png")
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        _plot_metric(ax, success_agg.groupby(["mrta_algo", "mapf_algo"]),
+                     combos, "soc", "Sum of Costs",
+                     "Sum of Costs vs Number of Robots")
+        _save(fig, "soc_vs_robots.png")
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        _plot_metric(ax, success_agg.groupby(["mrta_algo", "mapf_algo"]),
+                     combos, "plan_total_s", "Planning time (s)",
+                     "Planning Time vs Number of Robots")
+        _save(fig, "planning_time_vs_robots.png")
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        _plot_metric(ax, sr_agg.groupby(["mrta_algo", "mapf_algo"]),
+                     combos, "success_rate", "Success rate",
+                     "Success Rate vs Number of Robots")
+        ax.set_ylim(0, 1.05)
+        _save(fig, "success_rate_vs_robots.png")
+
+    print(f"Plots saved to: {out}")
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python -m batch.plotter <path/to/results.csv>")
+        sys.exit(1)
+    replot_csv(sys.argv[1])

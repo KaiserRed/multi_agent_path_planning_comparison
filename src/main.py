@@ -14,7 +14,13 @@ Flow
 
 from __future__ import annotations
 
+import os
 import sys
+
+# On Wayland sessions SDL2 defaults to XWayland whose GLX implementation
+# raises BadValue errors.  Force the native Wayland backend when available.
+if os.environ.get("WAYLAND_DISPLAY"):
+    os.environ.setdefault("SDL_VIDEODRIVER", "wayland")
 
 import pygame
 
@@ -31,6 +37,7 @@ from ui.batch_ui import (
 )
 from ui.editor import WorldEditor, SIDE_W as EDITOR_SIDE_W, _fit_cell
 from ui.menu import MainMenu, MENU_W, MENU_H
+from ui.widgets import set_theme, is_dark_theme
 from visualization.render import draw_simulation, _SIDE_W as SIM_SIDE_W
 
 
@@ -43,17 +50,20 @@ def _editor_win_size(scene: SceneData) -> tuple[int, int]:
 
 
 def _sim_win_size(world: World) -> tuple[int, int]:
-    cs = _cell_size(world)
-    w = world.width * cs + SIM_SIDE_W
-    h = max(world.height * cs, 360)
+    """Initial simulation window — same generous sizing as the editor."""
+    cs = _fit_cell(world.width, world.height, 860, 760)
+    w = max(world.width * cs + SIM_SIDE_W + 20, 800)
+    h = max(world.height * cs + 20, 620)
     return w, h
 
 
-def _cell_size(world: World) -> int:
-    avail = max(world.width * 16 + SIM_SIDE_W, 520)
-    return max(16, min(60,
-                       (avail - SIM_SIDE_W) // world.width,
-                       max(world.height * 16, 360) // world.height))
+def _cell_size_from_window(world: World, win_w: int, win_h: int) -> int:
+    """Compute cell size so the grid fills the available area inside the window."""
+    avail_w = win_w - SIM_SIDE_W - 10
+    avail_h = win_h - 10
+    return max(8, min(80,
+                      avail_w // max(world.width, 1),
+                      avail_h // max(world.height, 1)))
 
 
 def _build_scene(scene: SceneData, algo_type: str):
@@ -114,6 +124,9 @@ def run_menu(clock: pygame.time.Clock) -> str | None:
         menu.update()
         menu.draw()
 
+        if result == "toggle_theme":
+            set_theme(not is_dark_theme())
+            continue
         if result in ("create", "load", "batch", "quit"):
             return result
 
@@ -209,10 +222,10 @@ def run_simulation(
 
     simulator = Simulator(world, agents, planner, tasks, nav_planner=nav_planner)
 
-    cs = _cell_size(world)
     win_w, win_h = _sim_win_size(world)
     screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
     pygame.display.set_caption(f"Simulation — {algo_name}")
+    cs = _cell_size_from_window(world, win_w, win_h)
 
     font_h = pygame.font.SysFont("Arial", 14, bold=True)
     font_b = pygame.font.SysFont("Arial", 13)
@@ -233,6 +246,10 @@ def run_simulation(
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+            if event.type == pygame.WINDOWRESIZED:
+                cs = _cell_size_from_window(world,
+                                            event.x, event.y)
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:

@@ -17,11 +17,9 @@ def _draw_grid(surface, world, cell_size):
     for y in range(world.height):
         for x in range(world.width):
             rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
-            if world.grid[y, x] == 1:
-                pygame.draw.rect(surface, (45, 50, 75), rect)
-            else:
-                pygame.draw.rect(surface, (30, 40, 65), rect)
-            pygame.draw.rect(surface, (45, 58, 95), rect, 1)
+            bg = COLORS["grid_obstacle"] if world.grid[y, x] == 1 else COLORS["grid_free"]
+            pygame.draw.rect(surface, bg, rect)
+            pygame.draw.rect(surface, COLORS["grid_border"], rect, 1)
 
 
 def _draw_paths(surface, agents, cell_size):

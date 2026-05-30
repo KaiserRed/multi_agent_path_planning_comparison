@@ -5,26 +5,65 @@ Reusable Pygame UI widgets for the main menu.
 import pygame
 
 
-# Shared colour palette
-COLORS = {
-    "bg":           (13,  17,  36),
-    "panel":        (22,  30,  58),
-    "panel_light":  (32,  44,  80),
-    "accent":       (72, 149, 255),
-    "accent_dark":  (45, 105, 210),
-    "text":         (225, 232, 255),
-    "text_muted":   (130, 148, 195),
-    "selected":     (45,  105, 210),
-    "hover":        (38,  55,  95),
-    "border":       (55,  75, 130),
-    "success":      (55, 195,  95),
-    "error":        (220,  65,  65),
-    "task":         (255, 195,  50),
+_DARK: dict = {
+    "bg":            (13,  17,  36),
+    "panel":         (22,  30,  58),
+    "panel_light":   (32,  44,  80),
+    "accent":        (72, 149, 255),
+    "accent_dark":   (45, 105, 210),
+    "text":          (225, 232, 255),
+    "text_muted":    (130, 148, 195),
+    "selected":      (45,  105, 210),
+    "hover":         (38,  55,  95),
+    "border":        (55,  75, 130),
+    "success":       (55, 195,  95),
+    "error":         (220,  65,  65),
+    "task":          (255, 195,  50),
+    # Grid
+    "grid_free":     (28,  38,  65),
+    "grid_obstacle": (52,  57,  80),
+    "grid_border":   (46,  59,  96),
+}
+
+_LIGHT: dict = {
+    "bg":            (238, 242, 252),
+    "panel":         (255, 255, 255),
+    "panel_light":   (224, 230, 246),
+    "accent":        (38, 110, 225),
+    "accent_dark":   (22,  80, 185),
+    "text":          (18,  22,  50),
+    "text_muted":    (88, 104, 148),
+    "selected":      (22,  80, 185),
+    "hover":         (208, 218, 242),
+    "border":        (172, 190, 228),
+    "success":       (25, 148,  58),
+    "error":         (198,  38,  38),
+    "task":          (186, 118,   0),
+    # Grid
+    "grid_free":     (212, 220, 242),
+    "grid_obstacle": (128, 136, 162),
+    "grid_border":   (182, 193, 218),
 }
 
 
+COLORS: dict = dict(_DARK)
 
-# Button
+_dark_active: bool = True
+
+
+def set_theme(dark: bool) -> None:
+    """Switch between dark (default) and light theme."""
+    global _dark_active
+    _dark_active = dark
+    COLORS.clear()
+    COLORS.update(_DARK if dark else _LIGHT)
+
+
+def is_dark_theme() -> bool:
+    return _dark_active
+
+
+
 class Button:
     def __init__(self, rect, text: str, font, primary: bool = False):
         self.rect = pygame.Rect(rect)
@@ -66,8 +105,6 @@ class Button:
         surface.blit(surf, surf.get_rect(center=self.rect.center))
 
 
-
-# RadioGroup – mutually exclusive tab buttons
 class RadioGroup:
     def __init__(self, options: list[str], rect, font, selected: int = 0):
         self.options = options
@@ -104,8 +141,6 @@ class RadioGroup:
             surface.blit(txt, txt.get_rect(center=r.center))
 
 
-
-# Slider
 class Slider:
     def __init__(self, rect, min_val: float, max_val: float,
                  value: float, font, label: str = ""):
@@ -136,33 +171,27 @@ class Slider:
         return self.value
 
     def draw(self, surface: pygame.Surface):
-        # Label
         if self.label:
             lbl = self.font.render(
                 f"{self.label}: {self.value:.0f}%", True, COLORS["text_muted"]
             )
             surface.blit(lbl, (self.rect.x, self.rect.y - 20))
 
-        # Track
         track = pygame.Rect(self.rect.x, self.rect.centery - 3,
                             self.rect.width, 6)
         pygame.draw.rect(surface, COLORS["panel_light"], track, border_radius=3)
 
-        # Fill
         ratio = (self.value - self.min_val) / max(self.max_val - self.min_val, 1)
         fw = int(ratio * self.rect.width)
         if fw > 0:
             fill = pygame.Rect(self.rect.x, self.rect.centery - 3, fw, 6)
             pygame.draw.rect(surface, COLORS["accent"], fill, border_radius=3)
 
-        # Thumb
         tx = self.rect.x + fw
         pygame.draw.circle(surface, COLORS["accent"], (tx, self.rect.centery), 10)
         pygame.draw.circle(surface, COLORS["text"], (tx, self.rect.centery), 6)
 
 
-
-# NumberInput
 class NumberInput:
     def __init__(self, rect, value: int, font,
                  min_val: int = 1, max_val: int = 999):
@@ -227,8 +256,6 @@ class NumberInput:
         surface.blit(txt, txt.get_rect(center=self.rect.center))
 
 
-
-# Helpers
 def draw_panel(surface: pygame.Surface, rect, alpha: int = 210, radius: int = 10):
     """Draw a semi-transparent rounded panel."""
     s = pygame.Surface((rect[2], rect[3]), pygame.SRCALPHA)

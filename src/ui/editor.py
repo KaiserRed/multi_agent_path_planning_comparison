@@ -60,9 +60,9 @@ def draw_scene_preview(
         for gx in range(grid_w):
             rx, ry = ox + gx * cs, oy + gy * cs
             rect = pygame.Rect(rx, ry, cs, cs)
-            bg = (52, 57, 80) if (gx, gy) in obstacles else (28, 38, 65)
+            bg = COLORS["grid_obstacle"] if (gx, gy) in obstacles else COLORS["grid_free"]
             pygame.draw.rect(surface, bg, rect)
-            pygame.draw.rect(surface, (46, 59, 96), rect, 1)
+            pygame.draw.rect(surface, COLORS["grid_border"], rect, 1)
 
     goal_set = set() if isinstance(goals, set) else goals
     for idx, (gx, gy) in enumerate(goals):

@@ -1,15 +1,16 @@
 """
 Main menu — the first screen the user sees.
 
-Three options:
+Options:
   • Create Scenario → opens the world editor
   • Load Scenario   → file dialog, then editor (pre-populated)
-  • Batch Mode      → batch experiment mode
+  • Batch Mode      → batch testing workflow
+  • Toggle Theme    → switch between dark and light mode
 """
 
 import pygame
 
-from ui.widgets import Button, COLORS, draw_panel
+from ui.widgets import Button, COLORS, draw_panel, is_dark_theme
 
 MENU_W, MENU_H = 720, 540
 
@@ -29,9 +30,24 @@ class MainMenu:
         self._load_btn   = Button(dummy, "Load Scenario",   self._f_btn)
         self._batch_btn  = Button(dummy, "Batch Mode",      self._f_btn)
         self._quit_btn   = Button(pygame.Rect(0, 0, bw, 40), "Quit", self._f_btn)
-        self._btns = [self._create_btn, self._load_btn,
-                      self._batch_btn, self._quit_btn]
+
+        # Small theme toggle in the bottom-right corner
+        self._theme_btn = Button(
+            pygame.Rect(0, 0, 140, 28),
+            self._theme_label(),
+            self._f_small,
+        )
+
+        self._btns = [
+            self._create_btn, self._load_btn,
+            self._batch_btn, self._quit_btn,
+            self._theme_btn,
+        ]
         self.reflow()
+
+
+    def _theme_label(self) -> str:
+        return "☀  Light Mode" if is_dark_theme() else "🌙  Dark Mode"
 
     def reflow(self):
         """Recompute button positions from current window size."""
@@ -39,16 +55,17 @@ class MainMenu:
         bw = 280
         cx = W // 2
         base_y = max(160, int(H * 0.33))
-        step    = max(52, int(H * 0.11))
-        self._create_btn.rect = pygame.Rect(cx - bw // 2, base_y,           bw, 50)
-        self._load_btn.rect   = pygame.Rect(cx - bw // 2, base_y + step,    bw, 50)
-        self._batch_btn.rect  = pygame.Rect(cx - bw // 2, base_y + step*2,  bw, 50)
-        self._quit_btn.rect   = pygame.Rect(cx - bw // 2, base_y + step*3,  bw, 40)
-
+        step   = max(52, int(H * 0.11))
+        self._create_btn.rect = pygame.Rect(cx - bw // 2, base_y,          bw, 50)
+        self._load_btn.rect   = pygame.Rect(cx - bw // 2, base_y + step,   bw, 50)
+        self._batch_btn.rect  = pygame.Rect(cx - bw // 2, base_y + step*2, bw, 50)
+        self._quit_btn.rect   = pygame.Rect(cx - bw // 2, base_y + step*3, bw, 40)
+        self._theme_btn.rect  = pygame.Rect(W - 152, H - 36, 140, 28)
 
     def handle_events(self, events: list) -> str | None:
         """
-        Returns ``"create"``, ``"load"``, ``"batch"``, ``"quit"`` or ``None``.
+        Returns ``"create"``, ``"load"``, ``"batch"``, ``"quit"``,
+        ``"toggle_theme"``, or ``None``.
         """
         for event in events:
             if self._create_btn.handle_event(event):
@@ -59,11 +76,15 @@ class MainMenu:
                 return "batch"
             if self._quit_btn.handle_event(event):
                 return "quit"
+            if self._theme_btn.handle_event(event):
+                return "toggle_theme"
         return None
 
     def update(self):
         for btn in self._btns:
             btn.update()
+        # Keep label in sync with current theme
+        self._theme_btn.text = self._theme_label()
 
     def draw(self):
         W, H = self.screen.get_size()
